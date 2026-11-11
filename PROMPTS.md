@@ -1,8 +1,9 @@
 # LedgerLine & BalanceVault: Prompts & Engineering Log
 
-*Snovasys Fresher Hiring Challenge 2026 | Engineering Decision Log*
+*Snovasys Fresher Hiring Challenge 2026 | Engineering Decision Log*  
+**Repository:** [https://github.com/23bq1a4705-cloud/ledgerline](https://github.com/23bq1a4705-cloud/ledgerline)
 
-This document tracks the prompt interactions, architectural decisions, security design choices, and verification steps taken during development.
+This document tracks the prompt interactions, architectural decisions, security design choices, and verification steps taken during development, fulfilling challenge requirements.
 
 ---
 
@@ -14,6 +15,7 @@ This document tracks the prompt interactions, architectural decisions, security 
 - **Decision & Outcome:**
   Unified architecture selected: Node.js 24 + TypeScript + Express + Prisma (PostgreSQL / Neon) + React (Vite).
   - Why: Node v24 is already installed and verified on the host system; TypeScript provides strong static type safety; Prisma supports atomic transactions and extensions; Vitest + Supertest allows fast asynchronous concurrency testing without JVM startup overhead.
+- **Commit Link:** [`afa6850`](https://github.com/23bq1a4705-cloud/ledgerline/commit/afa6850781a6a57d434c8fac57b90cf29b385bf3)
 - **Reference Files:** `PRD.md`, `backend/package.json`, `backend/tsconfig.json`
 
 ---
@@ -30,6 +32,7 @@ This document tracks the prompt interactions, architectural decisions, security 
   - Transfer: Debits Sender Account, Credits Receiver Account ($\sum \text{Debit} = \sum \text{Credit}$).
   - Built `verifySystemConservation()` ensuring $\sum \text{Debits} - \sum \text{Credits} = 0.00$.
   - Built `reconcileAccount(accountId)` computing $\sum \text{Credits} - \sum \text{Debits}$ and asserting equality with stored balance.
+- **Commit Link:** [`afa6850`](https://github.com/23bq1a4705-cloud/ledgerline/commit/afa6850781a6a57d434c8fac57b90cf29b385bf3)
 - **Reference Files:** `backend/src/services/ledger.service.ts`, `backend/src/__tests__/conservation.test.ts`
 
 ---
@@ -43,6 +46,7 @@ This document tracks the prompt interactions, architectural decisions, security 
   - Created `requireRole` middleware for endpoint role boundaries.
   - Created `requireAccountOwnership` middleware for object-level validation.
   - Enforced ownership verification inside transaction controllers: an `ACCOUNT_HOLDER` attempting to withdraw or transfer from someone else's account receives HTTP 403 Forbidden and triggers a `SECURITY_OBJECT_AUTHORIZATION_BREACH_ATTEMPT` audit log.
+- **Commit Link:** [`afa6850`](https://github.com/23bq1a4705-cloud/ledgerline/commit/afa6850781a6a57d434c8fac57b90cf29b385bf3)
 - **Reference Files:** `backend/src/middleware/rbac.ts`, `backend/src/middleware/objectAuth.ts`, `backend/src/__tests__/authorization.test.ts`
 
 ---
@@ -56,6 +60,7 @@ This document tracks the prompt interactions, architectural decisions, security 
   - Mitigated race conditions using atomic conditional database updates (`UPDATE "Account" ... WHERE "id" = ? AND "balance" >= ? AND "status" = 'ACTIVE'`).
   - Added table-level constraint `CHECK (balance >= 0)`.
   - Built `idempotencyMiddleware` with SHA-256 payload hashing and 24-hour response caching. Repeated requests return cached response with `X-Idempotent-Replay: true`. Reusing a key with different parameters returns HTTP 409 Conflict.
+- **Commit Link:** [`afa6850`](https://github.com/23bq1a4705-cloud/ledgerline/commit/afa6850781a6a57d434c8fac57b90cf29b385bf3)
 - **Reference Files:** `backend/src/middleware/idempotency.ts`, `backend/src/__tests__/concurrency.test.ts`, `backend/src/__tests__/idempotency.test.ts`
 
 ---
@@ -69,5 +74,6 @@ This document tracks the prompt interactions, architectural decisions, security 
   - Designed `AuditLog` and `LedgerEntry` models without `updatedAt` timestamps.
   - Added Prisma query extensions that intercept `update`, `updateMany`, `delete`, and `deleteMany` operations on these models and throw immediate `SECURITY VIOLATION` exceptions.
   - Built `AuditService.log` to capture actor, role, action, target, outcome, IP address, and metadata.
+- **Commit Link:** [`afa6850`](https://github.com/23bq1a4705-cloud/ledgerline/commit/afa6850781a6a57d434c8fac57b90cf29b385bf3)
 - **Reference Files:** `backend/src/db/prisma.ts`, `backend/src/services/audit.service.ts`, `backend/src/__tests__/audit.test.ts`
 
