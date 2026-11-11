@@ -1,0 +1,149 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ACCOUNT_HOLDER
+  AUDITOR
+  ADMIN
+}
+
+enum AccountStatus {
+  ACTIVE
+  FROZEN
+  CLOSED
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  TRANSFER
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum LedgerDirection {
+  DEBIT
+  CREDIT
+}
+
+enum AuditOutcome {
+  SUCCESS
+  FAILURE
+}
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  passwordHash String
+  fullName     String
+  role         Role          @default(ACCOUNT_HOLDER)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  accounts      Account[]
+  auditLogs     AuditLog[]
+  idempotencies IdempotencyKey[]
+
+  @@index([email])
+}
+
+model Account {
+  id            String          @id @default(uuid())
+  accountNumber String          @unique
+  userId        String
+  user          User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+  balance       Decimal         @default(0.00) @db.Decimal(18, 4)
+  currency      String          @default("USD")
+  status        AccountStatus   @default(ACTIVE)
+  version       Int             @default(0)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  ledgerEntries LedgerEntry[]
+
+  @@index([userId])
+  @@index([accountNumber])
+}
+
+model Transaction {
+  id              String            @id @default(uuid())
+  referenceId     String            @unique @default(uuid())
+  type            TransactionType
+  status          TransactionStatus @default(PENDING)
+  amount          Decimal           @db.Decimal(18, 4)
+  currency        String            @default("USD")
+  sourceAccountId String?
+  targetAccountId String?
+  description     String?
+  idempotencyKey  String?           @unique
+  metadata        Json?
+  createdAt       DateTime          @default(now())
+
+  ledgerEntries   LedgerEntry[]
+
+  @@index([idempotencyKey])
+  @@index([createdAt])
+}
+
+model LedgerEntry {
+  id            String          @id @default(uuid())
+  transactionId String
+  transaction   Transaction     @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  accountId     String
+  account       Account         @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  direction     LedgerDirection
+  amount        Decimal         @db.Decimal(18, 4)
+  balanceAfter  Decimal         @db.Decimal(18, 4)
+  description   String?
+  createdAt     DateTime        @default(now())
+
+  @@index([accountId])
+  @@index([transactionId])
+  @@index([createdAt])
+}
+
+model IdempotencyKey {
+  key            String       @id
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint       String
+  requestHash    String
+  responseStatus Int
+  responseBody   Json
+  createdAt      DateTime     @default(now())
+  expiresAt      DateTime
+
+  @@index([userId, key])
+  @@index([expiresAt])
+}
+
+model AuditLog {
+  id         String       @id @default(uuid())
+  actorId    String?
+  actor      User?        @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorEmail String
+  actorRole  Role
+  action     String
+  targetType String
+  targetId   String?
+  outcome    AuditOutcome
+  details    Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime     @default(now())
+
+  @@index([actorId])
+  @@index([action])
+  @@index([createdAt])
+}
+

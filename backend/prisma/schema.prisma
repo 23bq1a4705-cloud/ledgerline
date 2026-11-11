@@ -1,0 +1,114 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  passwordHash String
+  fullName     String
+  role         String        @default("ACCOUNT_HOLDER")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  accounts      Account[]
+  auditLogs     AuditLog[]
+  idempotencies IdempotencyKey[]
+
+  @@index([email])
+}
+
+model Account {
+  id            String        @id @default(uuid())
+  accountNumber String        @unique
+  userId        String
+  user          User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  balance       Decimal       @default(0.00)
+  currency      String        @default("USD")
+  status        String        @default("ACTIVE")
+  version       Int           @default(0)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  ledgerEntries LedgerEntry[]
+
+  @@index([userId])
+  @@index([accountNumber])
+}
+
+model Transaction {
+  id              String        @id @default(uuid())
+  referenceId     String        @unique @default(uuid())
+  type            String
+  status          String        @default("PENDING")
+  amount          Decimal
+  currency        String        @default("USD")
+  sourceAccountId String?
+  targetAccountId String?
+  description     String?
+  idempotencyKey  String?       @unique
+  metadata        String?
+  createdAt       DateTime      @default(now())
+
+  ledgerEntries   LedgerEntry[]
+
+  @@index([idempotencyKey])
+  @@index([createdAt])
+}
+
+model LedgerEntry {
+  id            String      @id @default(uuid())
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  accountId     String
+  account       Account     @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  direction     String
+  amount        Decimal
+  balanceAfter  Decimal
+  description   String?
+  createdAt     DateTime    @default(now())
+
+  @@index([accountId])
+  @@index([transactionId])
+  @@index([createdAt])
+}
+
+model IdempotencyKey {
+  key            String   @id
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint       String
+  requestHash    String
+  responseStatus Int
+  responseBody   String
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+
+  @@index([userId, key])
+  @@index([expiresAt])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorEmail String
+  actorRole  String
+  action     String
+  targetType String
+  targetId   String?
+  outcome    String
+  details    String?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([actorId])
+  @@index([action])
+  @@index([createdAt])
+}
