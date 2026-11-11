@@ -29,7 +29,7 @@ export class LedgerService {
   /**
    * Helper to ensure the System Clearing Account exists
    */
-  static async getOrCreateSystemClearingAccount(tx?: Prisma.TransactionClient) {
+  static async getOrCreateSystemClearingAccount(tx?: any) {
     const client = tx || prisma;
     let clearing = await client.account.findUnique({
       where: { accountNumber: env.SYSTEM_CLEARING_ACCOUNT_NUMBER },

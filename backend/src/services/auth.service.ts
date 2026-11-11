@@ -59,7 +59,7 @@ export class AuthService {
         actor: {
           id: user.id,
           email: user.email,
-          role: user.role,
+          role: user.role as Role,
           ip: params.ipAddress,
         },
       });
@@ -69,7 +69,7 @@ export class AuthService {
     await AuditService.log({
       actorId: user.id,
       actorEmail: user.email,
-      actorRole: user.role,
+      actorRole: user.role as Role,
       action: 'AUTH_REGISTER',
       targetType: 'USER',
       targetId: user.id,
@@ -85,7 +85,7 @@ export class AuthService {
     const token = this.generateToken({
       id: user.id,
       email: user.email,
-      role: user.role,
+      role: user.role as Role,
       fullName: user.fullName,
     });
 
@@ -136,7 +136,7 @@ export class AuthService {
       await AuditService.log({
         actorId: user.id,
         actorEmail: user.email,
-        actorRole: user.role,
+        actorRole: user.role as Role,
         action: 'AUTH_LOGIN_FAILED',
         targetType: 'USER',
         targetId: user.id,
@@ -152,7 +152,7 @@ export class AuthService {
     await AuditService.log({
       actorId: user.id,
       actorEmail: user.email,
-      actorRole: user.role,
+      actorRole: user.role as Role,
       action: 'AUTH_LOGIN_SUCCESS',
       targetType: 'USER',
       targetId: user.id,
@@ -163,7 +163,7 @@ export class AuthService {
     const token = this.generateToken({
       id: user.id,
       email: user.email,
-      role: user.role,
+      role: user.role as Role,
       fullName: user.fullName,
     });
 
@@ -172,7 +172,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         fullName: user.fullName,
-        role: user.role,
+        role: user.role as Role,
       },
       token,
     };
@@ -183,7 +183,7 @@ export class AuthService {
    */
   static generateToken(payload: { id: string; email: string; role: Role; fullName: string }): string {
     return jwt.sign(payload, env.JWT_SECRET, {
-      expiresIn: env.JWT_EXPIRES_IN,
+      expiresIn: env.JWT_EXPIRES_IN as any,
     });
   }
 }

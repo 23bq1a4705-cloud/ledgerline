@@ -1,6 +1,7 @@
 import { Account, AuditLogItem, ConservationData, StatementData, User } from './types';
 
-const API_BASE = '/api';
+const envApiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+const API_BASE = envApiUrl ? `${envApiUrl}/api` : '/api';
 
 export class ApiClient {
   private static token: string | null = localStorage.getItem('ledgerline_token');

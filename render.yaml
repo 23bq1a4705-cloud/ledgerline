@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: ledgerline-backend
+    env: node
+    plan: free
+    region: oregon
+    rootDir: backend
+    buildCommand: npm install && node ./scripts/prepare-db.js && npx prisma db push --accept-data-loss && npx tsx prisma/seed.ts && npm run build
+    startCommand: npm run start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 24h
+      - key: CLIENT_URL
+        value: "*"
+      - key: INITIAL_ADMIN_EMAIL
+        value: admin@ledgerline.internal
+      - key: INITIAL_ADMIN_PASSWORD
+        value: AdminSecureVault2026!
+      - key: INITIAL_ADMIN_NAME
+        value: System Administrator
+      - key: SYSTEM_CLEARING_ACCOUNT_NUMBER
+        value: SYS-CLEARING-000000

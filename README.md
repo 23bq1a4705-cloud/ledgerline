@@ -123,6 +123,7 @@ npm run dev
 
 ## 7. Submission Artifacts
 
+- **Deployment Guide (Vercel + Render + Neon):** [`DEPLOYMENT.md`](file:///D:/Ledgerline/DEPLOYMENT.md)
 - **Threat Model:** [`THREATS.md`](file:///D:/Ledgerline/THREATS.md)
 - **Engineering Prompts & Log:** [`PROMPTS.md`](file:///D:/Ledgerline/PROMPTS.md)
 - **API Documentation:** [`API.md`](file:///D:/Ledgerline/API.md)

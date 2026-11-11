@@ -13,10 +13,28 @@ export function createApp() {
   // Security Headers
   app.use(helmet());
 
-  // CORS Configuration
+  // CORS Configuration (Supports local, Render, Vercel preview & production)
+  const clientUrls = env.CLIENT_URL ? env.CLIENT_URL.split(',').map((u) => u.trim()) : [];
   app.use(
     cors({
-      origin: [env.CLIENT_URL, 'http://localhost:5173', 'http://127.0.0.1:5173'],
+      origin: (origin, callback) => {
+        // Allow requests with no origin (e.g. mobile apps, curl, server-to-server, Render health check)
+        if (!origin) return callback(null, true);
+
+        if (
+          clientUrls.includes(origin) ||
+          clientUrls.includes('*') ||
+          origin.startsWith('http://localhost:') ||
+          origin.startsWith('http://127.0.0.1:') ||
+          origin.endsWith('.vercel.app') ||
+          origin.endsWith('.onrender.com') ||
+          env.NODE_ENV === 'development'
+        ) {
+          return callback(null, true);
+        }
+
+        return callback(new Error(`Origin ${origin} not permitted by CORS policy`));
+      },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
