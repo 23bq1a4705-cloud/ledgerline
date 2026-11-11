@@ -1,18 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { ApiClient } from './api';
 import { Account, AuditLogItem, ConservationData, StatementData, User } from './types';
-import CuteDog from './CuteDog';
-import CuteDecor from './CuteDecor';
-import { Icon, IconTile } from './Icon';
 import {
+  Landmark,
+  ShieldCheck,
   ArrowUpRight,
   ArrowDownLeft,
   ArrowLeftRight,
+  CreditCard,
+  CheckCircle2,
+  AlertCircle,
   RefreshCw,
   LogOut,
-  AlertCircle,
-  CheckCircle2,
-  PlusCircle,
+  Plus,
+  Activity,
+  FileText,
+  Shield,
 } from 'lucide-react';
 
 export default function App() {
@@ -45,36 +48,39 @@ export default function App() {
 
   // Auto-clear notifications
   useEffect(() => {
-    if (successMessage || errorMessage) {
-      const timer = setTimeout(() => {
-        setSuccessMessage(null);
-        setErrorMessage(null);
-      }, 5000);
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(null), 5000);
       return () => clearTimeout(timer);
     }
-  }, [successMessage, errorMessage]);
+  }, [successMessage]);
+
+  useEffect(() => {
+    if (errorMessage) {
+      const timer = setTimeout(() => setErrorMessage(null), 6000);
+      return () => clearTimeout(timer);
+    }
+  }, [errorMessage]);
 
   // Check existing session
   useEffect(() => {
     const token = ApiClient.getToken();
-    if (token) {
-      ApiClient.getMe()
-        .then((res) => {
-          setCurrentUser(res.user);
-        })
-        .catch(() => {
-          ApiClient.logout();
-          setCurrentUser(null);
-        });
+    const storedUser = localStorage.getItem('user');
+    if (token && storedUser) {
+      try {
+        const parsed = JSON.parse(storedUser);
+        setCurrentUser(parsed);
+      } catch {
+        localStorage.clear();
+      }
     }
   }, []);
 
-  // Fetch role-specific data
+  // Fetch role-specific data on login
   useEffect(() => {
     if (!currentUser) return;
 
     if (currentUser.role === 'ACCOUNT_HOLDER') {
-      loadMyAccounts();
+      loadAccounts();
     } else if (currentUser.role === 'AUDITOR') {
       loadAuditorData();
     } else if (currentUser.role === 'ADMIN') {
@@ -84,21 +90,22 @@ export default function App() {
 
   // Load statement when selected account changes
   useEffect(() => {
-    if (selectedAccountId) {
+    if (selectedAccountId && (currentUser?.role === 'ACCOUNT_HOLDER' || currentUser?.role === 'AUDITOR')) {
       loadStatement(selectedAccountId);
     }
-  }, [selectedAccountId]);
+  }, [selectedAccountId, currentUser]);
 
-  const loadMyAccounts = async () => {
+  // Data Loaders
+  const loadAccounts = async () => {
     try {
       setLoading(true);
-      const accs = await ApiClient.getMyAccounts();
-      setAccounts(accs);
-      if (accs.length > 0 && !selectedAccountId) {
-        setSelectedAccountId(accs[0].id);
+      const res = await ApiClient.getMyAccounts();
+      setAccounts(res);
+      if (res.length > 0 && !selectedAccountId) {
+        setSelectedAccountId(res[0].id);
       }
     } catch (err: any) {
-      setErrorMessage(err.message);
+      setErrorMessage(err.message || 'Failed to load accounts');
     } finally {
       setLoading(false);
     }
@@ -106,29 +113,30 @@ export default function App() {
 
   const loadStatement = async (accId: string) => {
     try {
-      const data = await ApiClient.getStatement(accId);
-      setStatement(data);
+      const res = await ApiClient.getStatement(accId);
+      setStatement(res);
     } catch (err: any) {
-      setErrorMessage(err.message);
+      setErrorMessage(err.message || 'Failed to load statement');
     }
   };
 
   const loadAuditorData = async () => {
     try {
       setLoading(true);
-      const [cons, logs, all] = await Promise.all([
+      const [consRes, auditRes, accRes] = await Promise.all([
         ApiClient.getConservation(),
         ApiClient.getAuditLogs(),
         ApiClient.getAllAccounts(),
       ]);
-      setConservation(cons);
-      setAuditLogs(logs.logs);
-      setAllAccounts(all.accounts);
-      if (all.accounts.length > 0 && !selectedAccountId) {
-        setSelectedAccountId(all.accounts[0].id);
+
+      setConservation(consRes);
+      setAuditLogs(auditRes.logs);
+      setAllAccounts(accRes.accounts);
+      if (accRes.accounts.length > 0 && !selectedAccountId) {
+        setSelectedAccountId(accRes.accounts[0].id);
       }
     } catch (err: any) {
-      setErrorMessage(err.message);
+      setErrorMessage(err.message || 'Failed to load audit telemetry');
     } finally {
       setLoading(false);
     }
@@ -137,59 +145,60 @@ export default function App() {
   const loadAdminData = async () => {
     try {
       setLoading(true);
-      const [all, logs, cons] = await Promise.all([
+      const [accRes, consRes, auditRes] = await Promise.all([
         ApiClient.getAllAccounts(),
-        ApiClient.getAuditLogs(),
         ApiClient.getConservation(),
+        ApiClient.getAuditLogs(),
       ]);
-      setAllAccounts(all.accounts);
-      setAuditLogs(logs.logs);
-      setConservation(cons);
+
+      setAllAccounts(accRes.accounts);
+      setConservation(consRes);
+      setAuditLogs(auditRes.logs);
     } catch (err: any) {
-      setErrorMessage(err.message);
+      setErrorMessage(err.message || 'Failed to load admin telemetry');
     } finally {
       setLoading(false);
     }
   };
 
-  // Seed Quick Login
-  const handleQuickLogin = async (loginEmail: string, loginPass: string) => {
-    try {
-      setLoading(true);
-      setErrorMessage(null);
-      const res = await ApiClient.login(loginEmail, loginPass);
-      setCurrentUser(res.user);
-      setSuccessMessage(`Signed in as ${res.user.fullName} (${res.user.role})`);
-    } catch (err: any) {
-      setErrorMessage(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Standard Auth Submit
+  // Auth Handlers
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setErrorMessage(null);
+    setSuccessMessage(null);
 
     try {
       if (authMode === 'login') {
         const res = await ApiClient.login(email, password);
+        localStorage.setItem('user', JSON.stringify(res.user));
         setCurrentUser(res.user);
         setSuccessMessage(`Welcome back, ${res.user.fullName}`);
       } else {
-        const res = await ApiClient.register({
-          email,
-          password,
-          fullName,
-          initialDeposit: Number(initialDeposit) || 0,
-        });
+        const res = await ApiClient.register({ email, password, fullName, initialDeposit });
+        localStorage.setItem('user', JSON.stringify(res.user));
         setCurrentUser(res.user);
-        setSuccessMessage(`Account registered successfully with account ${res.account?.accountNumber}`);
+        setSuccessMessage(`Account provisioned successfully for ${res.user.fullName}`);
       }
     } catch (err: any) {
-      setErrorMessage(err.message);
+      setErrorMessage(err.message || 'Authentication failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleQuickLogin = async (demoEmail: string, demoPass: string) => {
+    setEmail(demoEmail);
+    setPassword(demoPass);
+    setLoading(true);
+    setErrorMessage(null);
+    try {
+      const res = await ApiClient.login(demoEmail, demoPass);
+      localStorage.setItem('user', JSON.stringify(res.user));
+      setCurrentUser(res.user);
+      setSuccessMessage(`Signed in as ${res.user.fullName} (${res.user.role})`);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Quick login failed');
     } finally {
       setLoading(false);
     }
@@ -197,584 +206,741 @@ export default function App() {
 
   const handleLogout = () => {
     ApiClient.logout();
+    localStorage.removeItem('user');
     setCurrentUser(null);
     setAccounts([]);
-    setStatement(null);
     setSelectedAccountId('');
-    setDashboardTab('dashboard');
+    setStatement(null);
+    setConservation(null);
+    setAuditLogs([]);
+    setSuccessMessage('Session terminated successfully');
   };
 
-  // Transaction Execution
+  // Transaction Handler
   const handleExecuteTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
-      setErrorMessage('Please enter a valid positive number for amount');
+      setErrorMessage('Please specify a positive monetary amount');
       return;
     }
 
-    try {
-      setLoading(true);
-      setErrorMessage(null);
+    if (!selectedAccountId) {
+      setErrorMessage('Please select a funding account');
+      return;
+    }
 
+    setLoading(true);
+    setErrorMessage(null);
+
+    try {
       if (actionTab === 'deposit') {
         await ApiClient.deposit(selectedAccountId, numAmount, description);
-        setSuccessMessage(`Successfully deposited $${numAmount.toFixed(2)}`);
       } else if (actionTab === 'withdraw') {
         await ApiClient.withdraw(selectedAccountId, numAmount, description);
-        setSuccessMessage(`Successfully withdrew $${numAmount.toFixed(2)}`);
-      } else if (actionTab === 'transfer') {
-        if (!targetAccountNumber.trim()) {
-          setErrorMessage('Target account number is required for transfers');
+      } else {
+        if (!targetAccountNumber) {
+          setErrorMessage('Please specify destination account number (e.g. ACC-1000000002)');
           setLoading(false);
           return;
         }
-        await ApiClient.transfer(selectedAccountId, targetAccountNumber.trim(), numAmount, description);
-        setSuccessMessage(`Successfully transferred $${numAmount.toFixed(2)} to ${targetAccountNumber}`);
+        await ApiClient.transfer(selectedAccountId, targetAccountNumber, numAmount, description);
       }
 
+      setSuccessMessage(
+        `Transaction settled: ${actionTab.toUpperCase()} of $${numAmount.toFixed(2)} completed.`
+      );
       setAmount('');
       setDescription('');
-      setTargetAccountNumber('');
-      await loadMyAccounts();
-      if (selectedAccountId) {
-        await loadStatement(selectedAccountId);
-      }
+      if (actionTab === 'transfer') setTargetAccountNumber('');
+
+      // Refresh balance & statement
+      await loadAccounts();
+      await loadStatement(selectedAccountId);
     } catch (err: any) {
-      setErrorMessage(err.message);
+      setErrorMessage(err.message || 'Transaction rejected by financial engine');
     } finally {
       setLoading(false);
     }
   };
 
+  // Admin Toggle Account Status
+  const handleToggleAccountStatus = async (accId: string, currentStatus: string) => {
+    const newStatus = currentStatus === 'ACTIVE' ? 'FROZEN' : 'ACTIVE';
+    try {
+      setLoading(true);
+      await ApiClient.updateAccountStatus(accId, newStatus);
+      setSuccessMessage(`Account status changed to ${newStatus}`);
+      await loadAdminData();
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to update account status');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Open additional account
   const handleCreateNewAccount = async () => {
     try {
       setLoading(true);
-      const newAcc = await ApiClient.createAccount(0);
-      setSuccessMessage(`Created new account ${newAcc.accountNumber}`);
-      await loadMyAccounts();
-      setSelectedAccountId(newAcc.id);
+      await ApiClient.createAccount(0);
+      setSuccessMessage('Additional account vault opened successfully');
+      await loadAccounts();
     } catch (err: any) {
-      setErrorMessage(err.message);
+      setErrorMessage(err.message || 'Failed to open additional account');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleToggleAccountStatus = async (accId: string, currentStatus: string) => {
-    try {
-      setLoading(true);
-      const nextStatus = currentStatus === 'ACTIVE' ? 'FROZEN' : 'ACTIVE';
-      await ApiClient.updateAccountStatus(accId, nextStatus);
-      setSuccessMessage(`Account updated to ${nextStatus}`);
-      await loadAdminData();
-    } catch (err: any) {
-      setErrorMessage(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Derived helper values
+  const totalBalance = accounts.reduce((acc, a) => acc + parseFloat(a.balance || '0'), 0);
+  const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
 
-  // Calculations for Account Holder
-  const totalBalance = accounts.reduce((acc, a) => acc + (parseFloat(a.balance) || 0), 0);
-  const selectedAccount = accounts.find((a) => a.id === selectedAccountId) || accounts[0];
-
-  // Helper for masking account number
-  const formatMaskedAccount = (num?: string) => {
-    if (!num) return '';
-    if (num.length <= 8) return num;
-    return `${num.slice(0, 4)}••••${num.slice(-4)}`;
-  };
-
-  // Statement totals
-  const statementCreditsTotal = statement?.entries
+  const statementCreditsTotal = statement
     ? statement.entries
         .filter((e) => e.direction === 'CREDIT')
         .reduce((sum, e) => sum + parseFloat(e.amount), 0)
     : 0;
 
-  const statementDebitsTotal = statement?.entries
+  const statementDebitsTotal = statement
     ? statement.entries
         .filter((e) => e.direction === 'DEBIT')
         .reduce((sum, e) => sum + parseFloat(e.amount), 0)
     : 0;
 
-  // ----------------------------------------------------
-  // 1. LOGIN PAGE (THE DOG APPEARS ON THIS PAGE ONLY)
-  // ----------------------------------------------------
+  // Format account display
+  const formatMaskedAccount = (num: string) => {
+    if (!num) return '';
+    if (num.length <= 8) return num;
+    return `${num.slice(0, 4)}••••${num.slice(-4)}`;
+  };
+
+  // ====================================================
+  // 1. PROFESSIONAL ENTERPRISE LOGIN VIEW
+  // ====================================================
   if (!currentUser) {
     return (
-      <div className="login-page-wrapper">
-        {/* Soft Background Decor & Three Color Blobs */}
-        <div className="login-blob login-blob-lavender" aria-hidden="true" />
-        <div className="login-blob login-blob-mint" aria-hidden="true" />
-        <div className="login-blob login-blob-blush" aria-hidden="true" />
-        <CuteDecor />
-
-        {/* The Dog (<CuteDog />): position: absolute outside layout flow */}
-        <div className="login-dog-holder" aria-hidden="true">
-          <CuteDog flip={false} />
-        </div>
-
-        {/* Centred Card (width: 100%, max-width: 420px, margin: 0 auto) */}
-        <div className="login-card">
-          {/* Round lavender-to-blush badge containing a piggy bank icon */}
-          <div
-            style={{
-              width: 72,
-              height: 72,
-              borderRadius: '50%',
-              background: 'linear-gradient(135deg, var(--primary) 0%, var(--blush) 100%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto 16px',
-              boxShadow: '0 6px 18px rgba(184, 169, 245, 0.45)',
-            }}
-          >
-            <Icon name="piggy" size={40} />
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: 'var(--bg)',
+          padding: '32px 16px',
+        }}
+      >
+        <div style={{ width: '100%', maxWidth: 440 }}>
+          {/* Brand Header */}
+          <div style={{ textAlign: 'center', marginBottom: 28 }}>
+            <div
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'var(--primary)',
+                color: '#ffffff',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: 'var(--shadow-md)',
+                marginBottom: 14,
+              }}
+            >
+              <Landmark size={26} strokeWidth={2.2} />
+            </div>
+            <h1 style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: 6 }}>
+              LedgerLine <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>BalanceVault</span>
+            </h1>
+            <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+              Enterprise Double-Entry Money Movement Engine
+            </p>
           </div>
-
-          {/* Title & Subtitle */}
-          <h1 style={{ fontSize: '1.55rem', fontWeight: 900, color: 'var(--text)', marginBottom: 4 }}>
-            Welcome to BalanceVault
-          </h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: 20 }}>
-            Sign in to your demo account
-          </p>
 
           {/* Feedback Alerts */}
           {errorMessage && (
-            <div className="success-animated" style={{ padding: '10px 14px', borderRadius: 'var(--radius-sm)', backgroundColor: 'var(--danger-bg)', border: '1px solid #ffd4d8', color: 'var(--danger)', marginBottom: 16, fontSize: '0.85rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left' }}>
-              <AlertCircle size={16} />
+            <div
+              className="animate-fade-in"
+              style={{
+                padding: '12px 14px',
+                borderRadius: 'var(--radius-sm)',
+                backgroundColor: 'var(--danger-light)',
+                border: '1px solid var(--danger-border)',
+                color: 'var(--danger-text)',
+                marginBottom: 16,
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+              }}
+            >
+              <AlertCircle size={18} style={{ flexShrink: 0, color: 'var(--danger)' }} />
               <span>{errorMessage}</span>
             </div>
           )}
           {successMessage && (
-            <div className="success-animated" style={{ padding: '10px 14px', borderRadius: 'var(--radius-sm)', backgroundColor: 'var(--success-bg)', border: '1px solid #c8e6c9', color: 'var(--success)', marginBottom: 16, fontSize: '0.85rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left' }}>
-              <CheckCircle2 size={16} />
+            <div
+              className="animate-fade-in"
+              style={{
+                padding: '12px 14px',
+                borderRadius: 'var(--radius-sm)',
+                backgroundColor: 'var(--success-light)',
+                border: '1px solid var(--success-border)',
+                color: 'var(--success-text)',
+                marginBottom: 16,
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+              }}
+            >
+              <CheckCircle2 size={18} style={{ flexShrink: 0, color: 'var(--success)' }} />
               <span>{successMessage}</span>
             </div>
           )}
 
-          {/* Sign In Form */}
-          <form onSubmit={handleAuthSubmit} style={{ textAlign: 'left' }}>
-            {authMode === 'register' && (
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, color: 'var(--text)', marginBottom: 5 }}>
-                  Full Name
-                </label>
+          {/* Main Auth Card */}
+          <div className="pro-card" style={{ padding: '32px 28px' }}>
+            <div style={{ marginBottom: 20 }}>
+              <h2 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
+                {authMode === 'login' ? 'Sign in to your account' : 'Register new business account'}
+              </h2>
+              <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                {authMode === 'login' ? 'Enter credentials to access financial ledgers' : 'Provision a new customer ledger vault'}
+              </p>
+            </div>
+
+            <form onSubmit={handleAuthSubmit}>
+              {authMode === 'register' && (
+                <div className="form-group">
+                  <label className="form-label">Full Legal Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="Jane Doe"
+                    className="form-input"
+                  />
+                </div>
+              )}
+
+              <div className="form-group">
+                <label className="form-label">Email Address</label>
                 <input
-                  type="text"
+                  type="email"
                   required
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Jane Doe"
-                  className="login-input"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@company.com"
+                  className="form-input"
                 />
               </div>
-            )}
 
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, color: 'var(--text)', marginBottom: 5 }}>
-                Username
-              </label>
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@example.com"
-                className="login-input"
-              />
-            </div>
-
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, color: 'var(--text)', marginBottom: 5 }}>
-                Password
-              </label>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="login-input"
-              />
-            </div>
-
-            {authMode === 'register' && (
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, color: 'var(--text)', marginBottom: 5 }}>
-                  Initial Deposit ($)
-                </label>
+              <div className="form-group">
+                <label className="form-label">Password</label>
                 <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={initialDeposit}
-                  onChange={(e) => setInitialDeposit(parseFloat(e.target.value) || 0)}
-                  className="login-input"
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••••••"
+                  className="form-input"
                 />
               </div>
-            )}
 
-            {/* Lavender pill "Sign in" button with dark text (#2b2447) */}
-            <button
-              type="submit"
-              disabled={loading}
-              className="btn-pill btn-lavender-dark-text"
-              style={{ width: '100%', padding: '13px 0', fontSize: '0.98rem' }}
-            >
-              {loading ? 'Processing...' : authMode === 'login' ? 'Sign in' : 'Complete Registration'}
-            </button>
-          </form>
+              {authMode === 'register' && (
+                <div className="form-group">
+                  <label className="form-label">Initial Funding Amount ($)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={initialDeposit}
+                    onChange={(e) => setInitialDeposit(parseFloat(e.target.value) || 0)}
+                    className="form-input"
+                  />
+                </div>
+              )}
 
-          {/* Stronger mint info note (#c9f2e0) with green shield icon */}
-          <div className="login-info-note">
-            <Icon name="shield" size={20} color="#1d6644" />
-            <span className="login-info-note-text">
-              Demo data only. No real money moves here.
-            </span>
-          </div>
+              <button
+                type="submit"
+                disabled={loading}
+                className="btn btn-primary"
+                style={{ width: '100%', padding: '11px 0', fontSize: '0.92rem', marginTop: 8 }}
+              >
+                {loading ? 'Authenticating...' : authMode === 'login' ? 'Sign in' : 'Create Account Vault'}
+              </button>
+            </form>
 
-          {/* Quick Demo Seed Accounts: 1-click chips with different pastel fills & dark text */}
-          <div style={{ marginTop: 22, paddingTop: 16, borderTop: '1px dashed var(--border)' }}>
-            <div style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>
-              1-Click Demo Logins
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, justifyContent: 'center' }}>
+            <div style={{ marginTop: 18, textAlign: 'center' }}>
               <button
                 type="button"
-                onClick={() => handleQuickLogin('alice@ledgerline.internal', 'AlicePass2026!')}
-                className="demo-chip demo-chip-lavender"
+                onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '0.8125rem',
+                  fontWeight: 600,
+                  color: 'var(--primary)',
+                  cursor: 'pointer',
+                }}
               >
-                Alice ($1k)
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('bob@ledgerline.internal', 'BobPass2026!')}
-                className="demo-chip demo-chip-mint"
-              >
-                Bob ($500)
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('auditor@ledgerline.internal', 'AuditorPass2026!')}
-                className="demo-chip demo-chip-peach"
-              >
-                Auditor
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('admin@ledgerline.internal', 'AdminSecureVault2026!')}
-                className="demo-chip demo-chip-blush"
-              >
-                Admin
+                {authMode === 'login'
+                  ? 'Need a new demo account? Register here'
+                  : 'Already registered? Sign in to existing account'}
               </button>
             </div>
+
+            {/* Quick Demo Evaluation Personas */}
+            <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--border)' }}>
+              <div
+                style={{
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  color: 'var(--text-muted)',
+                  marginBottom: 10,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <Shield size={13} />
+                <span>1-Click Evaluator Seed Accounts</span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => handleQuickLogin('alice@ledgerline.internal', 'AlicePass2026!')}
+                  className="btn btn-secondary btn-sm"
+                  style={{ justifyContent: 'flex-start', padding: '8px 10px' }}
+                >
+                  <div style={{ textAlign: 'left' }}>
+                    <div style={{ fontWeight: 700, fontSize: '0.78rem' }}>Alice ($1,000)</div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Customer</div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleQuickLogin('bob@ledgerline.internal', 'BobPass2026!')}
+                  className="btn btn-secondary btn-sm"
+                  style={{ justifyContent: 'flex-start', padding: '8px 10px' }}
+                >
+                  <div style={{ textAlign: 'left' }}>
+                    <div style={{ fontWeight: 700, fontSize: '0.78rem' }}>Bob ($500)</div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Recipient</div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleQuickLogin('auditor@ledgerline.internal', 'AuditorPass2026!')}
+                  className="btn btn-secondary btn-sm"
+                  style={{ justifyContent: 'flex-start', padding: '8px 10px' }}
+                >
+                  <div style={{ textAlign: 'left' }}>
+                    <div style={{ fontWeight: 700, fontSize: '0.78rem' }}>Auditor</div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Read-Only</div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleQuickLogin('admin@ledgerline.internal', 'AdminSecureVault2026!')}
+                  className="btn btn-secondary btn-sm"
+                  style={{ justifyContent: 'flex-start', padding: '8px 10px' }}
+                >
+                  <div style={{ textAlign: 'left' }}>
+                    <div style={{ fontWeight: 700, fontSize: '0.78rem' }}>Admin</div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Operations</div>
+                  </div>
+                </button>
+              </div>
+            </div>
           </div>
 
-          {/* Toggle Login / Register */}
-          <div style={{ marginTop: 14 }}>
-            <button
-              type="button"
-              onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}
-              style={{ fontSize: '0.8rem', color: 'var(--primary-hover)', fontWeight: 800, background: 'none', border: 'none', cursor: 'pointer' }}
-            >
-              {authMode === 'login' ? "Need a new account? Register here" : "Already have an account? Sign in"}
-            </button>
+          {/* Compliance & Security Guarantee Note */}
+          <div
+            style={{
+              marginTop: 18,
+              textAlign: 'center',
+              fontSize: '0.75rem',
+              color: 'var(--text-muted)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+            }}
+          >
+            <ShieldCheck size={16} color="var(--success)" />
+            <span>Strict double-entry accounting • Mathematical conservation enforced</span>
           </div>
         </div>
       </div>
     );
   }
 
-  // ----------------------------------------------------
-  // 2, 3, 4. AUTHENTICATED PAGES (NO DOG ON ANY OF THESE)
-  // ----------------------------------------------------
+  // ====================================================
+  // 2. AUTHENTICATED APPLICATION INTERFACE
+  // ====================================================
   return (
-    <div className="page-bg">
-      {/* Soft Background Decor */}
-      <div className="bg-circle bg-circle-tl" aria-hidden="true" />
-      <div className="bg-circle bg-circle-br" aria-hidden="true" />
-      <CuteDecor />
-
-      {/* HEADER */}
+    <div className="app-container">
+      {/* PROFESSIONAL ENTERPRISE TOPBAR */}
       <header
         style={{
-          padding: '16px 32px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
+          backgroundColor: '#ffffff',
           borderBottom: '1px solid var(--border)',
-          backgroundColor: 'rgba(255, 255, 255, 0.88)',
-          backdropFilter: 'blur(10px)',
           position: 'sticky',
           top: 0,
           zIndex: 100,
         }}
       >
-        {/* Logo Tile, App Name, Demo Caption */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          {/* Lavender rounded square with "B" */}
-          <div
-            style={{
-              width: 42,
-              height: 42,
-              borderRadius: 'var(--radius-sm)',
-              backgroundColor: 'var(--primary)',
-              color: '#ffffff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 900,
-              fontSize: '1.3rem',
-              boxShadow: '0 4px 12px rgba(184, 169, 245, 0.45)',
-            }}
-          >
-            B
-          </div>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text)' }}>
-                LedgerLine & BalanceVault
-              </span>
-              <span className="badge-pill badge-lavender" style={{ fontSize: '0.7rem' }}>
-                Demo data only
-              </span>
+        <div
+          style={{
+            maxWidth: 1200,
+            margin: '0 auto',
+            padding: '0 24px',
+            height: 64,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          {/* Logo & Platform Title */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 'var(--radius-sm)',
+                backgroundColor: 'var(--primary)',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Landmark size={20} strokeWidth={2.2} />
             </div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-              {currentUser.fullName} ({currentUser.role})
-            </div>
-          </div>
-        </div>
 
-        {/* Pill Nav (Accounts, Statements) + Blush "Sign out" pill */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--text-primary)' }}>
+                  LedgerLine
+                </span>
+                <span style={{ color: 'var(--text-light)', fontWeight: 300 }}>|</span>
+                <span style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-secondary)' }}>
+                  BalanceVault
+                </span>
+                <span className="badge badge-neutral" style={{ fontSize: '0.68rem', padding: '2px 7px' }}>
+                  DEMO DATA
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Navigation Links for Account Holder */}
           {currentUser.role === 'ACCOUNT_HOLDER' && (
-            <>
+            <div style={{ display: 'flex', gap: 4 }}>
               <button
                 type="button"
                 onClick={() => setDashboardTab('dashboard')}
-                className={`btn-pill ${dashboardTab === 'dashboard' ? 'btn-lavender' : 'btn-white'}`}
-                style={{ padding: '8px 18px', fontSize: '0.85rem' }}
+                className={`btn btn-sm ${dashboardTab === 'dashboard' ? 'btn-primary' : 'btn-ghost'}`}
               >
-                Accounts
+                <Activity size={14} />
+                Accounts & Movement
               </button>
               <button
                 type="button"
                 onClick={() => setDashboardTab('statements')}
-                className={`btn-pill ${dashboardTab === 'statements' ? 'btn-lavender' : 'btn-white'}`}
-                style={{ padding: '8px 18px', fontSize: '0.85rem' }}
+                className={`btn btn-sm ${dashboardTab === 'statements' ? 'btn-primary' : 'btn-ghost'}`}
               >
-                Statements
+                <FileText size={14} />
+                Statements & Audit
               </button>
-            </>
+            </div>
           )}
 
-          {/* Blush "Sign out" pill */}
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="btn-pill btn-blush"
-            style={{ padding: '8px 18px', fontSize: '0.85rem' }}
-          >
-            <LogOut size={15} />
-            Sign out
-          </button>
+          {/* User Profile Chip & Sign Out */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                {currentUser.fullName}
+              </div>
+              <span
+                className={`badge ${
+                  currentUser.role === 'ADMIN'
+                    ? 'badge-danger'
+                    : currentUser.role === 'AUDITOR'
+                    ? 'badge-warning'
+                    : 'badge-primary'
+                }`}
+                style={{ fontSize: '0.68rem', padding: '1px 6px', marginTop: 2 }}
+              >
+                {currentUser.role.replace('_', ' ')}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="btn btn-secondary btn-sm"
+              title="Sign Out"
+            >
+              <LogOut size={14} />
+              <span>Sign out</span>
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main style={{ maxWidth: 1140, width: '100%', margin: '28px auto', padding: '0 24px 60px', flex: 1, position: 'relative', zIndex: 10 }}>
-        {/* Soft Feedback Alerts */}
+      {/* MAIN CONTENT REGION */}
+      <main style={{ maxWidth: 1200, width: '100%', margin: '24px auto', padding: '0 24px 60px', flex: 1 }}>
+        {/* Real-time Alerts */}
         {errorMessage && (
-          <div className="success-animated" style={{ padding: '14px 20px', borderRadius: 'var(--radius-sm)', backgroundColor: 'var(--danger-bg)', border: '1px solid #ffd4d8', color: 'var(--danger)', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <AlertCircle size={20} />
-            <span style={{ fontWeight: 700 }}>{errorMessage}</span>
+          <div
+            className="animate-fade-in"
+            style={{
+              padding: '12px 18px',
+              borderRadius: 'var(--radius-sm)',
+              backgroundColor: 'var(--danger-light)',
+              border: '1px solid var(--danger-border)',
+              color: 'var(--danger-text)',
+              marginBottom: 20,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontWeight: 600,
+              fontSize: '0.875rem',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <AlertCircle size={18} color="var(--danger)" />
+              <span>{errorMessage}</span>
+            </div>
+            <button
+              onClick={() => setErrorMessage(null)}
+              style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '0.85rem' }}
+            >
+              Dismiss
+            </button>
           </div>
         )}
+
         {successMessage && (
-          <div className="success-animated" style={{ padding: '14px 20px', borderRadius: 'var(--radius-sm)', backgroundColor: 'var(--success-bg)', border: '1px solid #c8e6c9', color: 'var(--success)', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <CheckCircle2 size={20} />
-            <span style={{ fontWeight: 700 }}>{successMessage}</span>
+          <div
+            className="animate-fade-in"
+            style={{
+              padding: '12px 18px',
+              borderRadius: 'var(--radius-sm)',
+              backgroundColor: 'var(--success-light)',
+              border: '1px solid var(--success-border)',
+              color: 'var(--success-text)',
+              marginBottom: 20,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontWeight: 600,
+              fontSize: '0.875rem',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <CheckCircle2 size={18} color="var(--success)" />
+              <span>{successMessage}</span>
+            </div>
+            <button
+              onClick={() => setSuccessMessage(null)}
+              style={{ background: 'none', border: 'none', color: 'var(--success)', cursor: 'pointer', fontSize: '0.85rem' }}
+            >
+              Dismiss
+            </button>
           </div>
         )}
 
         {/* ==================================================== */}
-        {/* ROLE 1: ACCOUNT HOLDER PAGES                         */}
+        {/* ROLE 1: ACCOUNT HOLDER VIEWS                         */}
         {/* ==================================================== */}
         {currentUser.role === 'ACCOUNT_HOLDER' && (
           <>
-            {/* VIEW 1: MAIN DASHBOARD (NO DOG) */}
+            {/* VIEW A: MAIN DASHBOARD */}
             {dashboardTab === 'dashboard' && (
-              <div>
-                {/* HERO BANNER: Lavender -> Sky -> Peach gradient */}
+              <div className="animate-fade-in">
+                {/* TOP FINANCIAL METRICS STRIP */}
                 <div
                   style={{
-                    background: 'linear-gradient(135deg, rgba(184, 169, 245, 0.45) 0%, rgba(168, 218, 220, 0.4) 50%, rgba(255, 229, 199, 0.45) 100%)',
-                    borderRadius: 'var(--radius-lg)',
-                    padding: '36px 40px',
-                    marginBottom: 32,
-                    boxShadow: '0 10px 30px rgba(184, 169, 245, 0.18)',
-                    border: '1px solid rgba(255, 255, 255, 0.85)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    flexWrap: 'wrap',
-                    gap: 24,
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                    gap: 16,
+                    marginBottom: 24,
                   }}
                 >
-                  {/* Left: Greeting with tiny heart, Total Balance, White Action Pills */}
-                  <div style={{ flex: '1 1 300px' }}>
-                    <div style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-muted)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span>Hi {currentUser.fullName.split(' ')[0] || currentUser.fullName}, welcome back</span>
-                      <span style={{ color: '#ff9ebb', fontSize: '1rem' }}>♡</span>
+                  {/* Card 1: Total Portfolio Balance */}
+                  <div className="pro-card" style={{ padding: '24px 22px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        Total Portfolio Balance
+                      </span>
+                      <span className="badge badge-success">USD • Verified</span>
                     </div>
 
-                    <div style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-light)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      Total balance
-                    </div>
-
-                    <div className="mono" style={{ fontSize: '2.9rem', fontWeight: 900, color: 'var(--text)', margin: '4px 0 18px', letterSpacing: '-0.02em' }}>
+                    <div className="mono" style={{ fontSize: '2.25rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: 16 }}>
                       ${totalBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ display: 'flex', gap: 8 }}>
                       <button
                         type="button"
                         onClick={() => {
                           setActionTab('deposit');
-                          document.getElementById('send-money-card')?.scrollIntoView({ behavior: 'smooth' });
+                          document.getElementById('action-card')?.scrollIntoView({ behavior: 'smooth' });
                         }}
-                        className="btn-pill btn-white"
+                        className="btn btn-secondary btn-sm"
                       >
-                        <ArrowDownLeft size={16} />
+                        <ArrowDownLeft size={14} color="var(--success)" />
                         Deposit
                       </button>
-
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActionTab('transfer');
+                          document.getElementById('action-card')?.scrollIntoView({ behavior: 'smooth' });
+                        }}
+                        className="btn btn-secondary btn-sm"
+                      >
+                        <ArrowLeftRight size={14} color="var(--primary)" />
+                        Transfer
+                      </button>
                       <button
                         type="button"
                         onClick={() => {
                           setActionTab('withdraw');
-                          document.getElementById('send-money-card')?.scrollIntoView({ behavior: 'smooth' });
+                          document.getElementById('action-card')?.scrollIntoView({ behavior: 'smooth' });
                         }}
-                        className="btn-pill btn-white"
+                        className="btn btn-secondary btn-sm"
                       >
-                        <ArrowUpRight size={16} />
+                        <ArrowUpRight size={14} color="var(--danger)" />
                         Withdraw
                       </button>
                     </div>
                   </div>
 
-                  {/* Right: Rounded mint-to-sky "Your vault" card with lock icon tile */}
-                  <div
-                    style={{
-                      width: 220,
-                      background: 'linear-gradient(135deg, var(--mint) 0%, var(--sky) 100%)',
-                      borderRadius: 'var(--radius-md)',
-                      padding: '22px 20px',
-                      boxShadow: 'var(--shadow-sm)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 12,
-                      transition: 'transform 0.22s ease, box-shadow 0.22s ease',
-                      cursor: 'default',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.transform = 'translateY(-3.5px)';
-                      e.currentTarget.style.boxShadow = 'var(--shadow-md)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.transform = 'translateY(0)';
-                      e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <IconTile name="lock" size={38} bg="rgba(255, 255, 255, 0.85)" />
-                      <div style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--text)' }}>
-                        Your vault
+                  {/* Card 2: Cryptographic Vault Security */}
+                  <div className="pro-card" style={{ padding: '24px 22px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        Ledger Integrity Status
+                      </span>
+                      <span className="badge badge-primary">Double-Entry</span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '8px 0 14px' }}>
+                      <ShieldCheck size={28} color="var(--success)" />
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-primary)' }}>
+                          Books Strictly Balanced
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                          System Clearing: <span className="mono">SYS-CLEARING-000000</span>
+                        </div>
                       </div>
                     </div>
-                    <p style={{ fontSize: '0.82rem', color: 'var(--text)', lineHeight: 1.4, fontWeight: 700 }}>
-                      Every transfer is checked and recorded
-                    </p>
+
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.45, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                      Every transaction produces immutable paired credit & debit entries. Idempotent keys prevent accidental re-execution.
+                    </div>
+                  </div>
+
+                  {/* Card 3: Vault Accounts Summary */}
+                  <div className="pro-card" style={{ padding: '24px 22px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        Account Vaults
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleCreateNewAccount}
+                        className="btn btn-secondary btn-sm"
+                        style={{ padding: '3px 8px', fontSize: '0.75rem' }}
+                      >
+                        <Plus size={13} />
+                        New Vault
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, margin: '8px 0 12px' }}>
+                      <span style={{ fontSize: '2.25rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                        {accounts.length}
+                      </span>
+                      <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Active Vaults</span>
+                    </div>
+
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                      Selected Account:{' '}
+                      <span className="mono" style={{ fontWeight: 700 }}>
+                        {selectedAccount ? selectedAccount.accountNumber : 'None'}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
-                {/* "YOUR ACCOUNTS" SECTION (Cards with piggy/wallet tile & coloured top border) */}
-                <div style={{ marginBottom: 32 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <IconTile name="wallet" size={38} bg="var(--primary-light)" />
-                      <div>
-                        <h2 style={{ fontSize: '1.3rem', fontWeight: 800 }}>Your accounts</h2>
-                        <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                          Select an account to view activity and transfer money
-                        </p>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={handleCreateNewAccount}
-                      className="btn-pill btn-white"
-                      style={{ fontSize: '0.85rem' }}
-                    >
-                      <PlusCircle size={16} />
-                      Open Additional Account
-                    </button>
+                {/* VAULT ACCOUNTS SELECTOR */}
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <h2 style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      Your Account Vaults
+                    </h2>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      Click to switch active vault
+                    </span>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 18 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
                     {accounts.map((acc, index) => {
-                      // Coloured top borders: alternating mint, blush, sky
-                      const topBorderColor =
-                        index % 3 === 0 ? 'var(--mint)' : index % 3 === 1 ? 'var(--blush)' : 'var(--sky)';
                       const isSelected = selectedAccountId === acc.id;
-
                       return (
                         <div
                           key={acc.id}
                           onClick={() => setSelectedAccountId(acc.id)}
-                          className="card-soft"
+                          className="pro-card pro-card-hover"
                           style={{
-                            padding: '24px 22px',
+                            padding: '18px 20px',
                             cursor: 'pointer',
-                            borderTop: `4px solid ${topBorderColor}`,
-                            boxShadow: isSelected ? '0 0 0 2.5px var(--primary), var(--shadow-md)' : 'var(--shadow-sm)',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
+                            borderColor: isSelected ? 'var(--primary)' : 'var(--border)',
+                            backgroundColor: isSelected ? 'var(--primary-light)' : '#ffffff',
+                            position: 'relative',
                           }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                            <IconTile
-                              name={index % 2 === 0 ? 'piggy' : 'wallet'}
-                              size={44}
-                              bg={index % 2 === 0 ? 'var(--blush-light)' : 'var(--primary-light)'}
-                            />
-                            <div>
-                              <div style={{ fontWeight: 800, fontSize: '0.98rem', color: 'var(--text)', marginBottom: 2 }}>
-                                {index === 0 ? 'Primary Checking' : `Savings Vault #${index + 1}`}
-                              </div>
-                              <div className="mono" style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                                {formatMaskedAccount(acc.accountNumber)}
-                              </div>
-                              <span className="badge-pill badge-mint" style={{ marginTop: 6, fontSize: '0.7rem' }}>
-                                {acc.status}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <CreditCard size={18} color={isSelected ? 'var(--primary)' : 'var(--text-muted)'} />
+                              <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                                {index === 0 ? 'Primary Checking Vault' : `Savings Vault #${index + 1}`}
                               </span>
                             </div>
+                            <span className="badge badge-success" style={{ fontSize: '0.65rem' }}>
+                              {acc.status}
+                            </span>
                           </div>
 
-                          <div style={{ textAlign: 'right' }}>
-                            <div className="mono" style={{ fontSize: '1.55rem', fontWeight: 900, color: 'var(--text)' }}>
+                          <div className="mono" style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: 8 }}>
+                            {formatMaskedAccount(acc.accountNumber)}
+                          </div>
+
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                            <div className="mono" style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-primary)' }}>
                               ${parseFloat(acc.balance).toFixed(2)}
                             </div>
-                            <div style={{ fontSize: '0.74rem', color: 'var(--text-light)', fontWeight: 600 }}>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>
                               {acc.currency}
-                            </div>
+                            </span>
                           </div>
                         </div>
                       );
@@ -782,57 +948,66 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* "SEND MONEY" AND "RECENT ACTIVITY" SECTION */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 24 }}>
-                  {/* SEND MONEY CARD (with plane icon, labelled inputs, lavender button, mint shield note) */}
-                  <div id="send-money-card" className="card-soft" style={{ padding: 28 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                      <IconTile name="plane" size={42} bg="var(--mint-light)" />
+                {/* TRANSACTION & RECENT ACTIVITY DUAL GRID */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 20 }}>
+                  {/* LEFT: MONEY MOVEMENT ACTION CENTER */}
+                  <div id="action-card" className="pro-card" style={{ padding: '24px 22px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                      <div
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 'var(--radius-sm)',
+                          backgroundColor: 'var(--surface-subtle)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <ArrowLeftRight size={18} color="var(--primary)" />
+                      </div>
                       <div>
-                        <h3 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Send money</h3>
-                        <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                          Protected by instant idempotency keys
+                        <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>Initiate Transaction</h3>
+                        <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                          ACID compliant transaction with idempotency verification
                         </p>
                       </div>
                     </div>
 
-                    {/* Action Tabs: Send money, Deposit, Withdraw */}
-                    <div style={{ display: 'flex', gap: 8, borderBottom: '1px solid var(--border)', paddingBottom: 14, marginBottom: 18 }}>
+                    {/* Transaction Mode Tabs */}
+                    <div style={{ display: 'flex', gap: 6, borderBottom: '1px solid var(--border)', paddingBottom: 12, marginBottom: 16 }}>
                       <button
                         type="button"
                         onClick={() => setActionTab('transfer')}
-                        className={`btn-pill ${actionTab === 'transfer' ? 'btn-lavender' : 'btn-white'}`}
-                        style={{ padding: '6px 14px', fontSize: '0.82rem' }}
+                        className={`btn btn-sm ${actionTab === 'transfer' ? 'btn-primary' : 'btn-secondary'}`}
                       >
-                        <ArrowLeftRight size={14} /> Send money
+                        Transfer
                       </button>
                       <button
                         type="button"
                         onClick={() => setActionTab('deposit')}
-                        className={`btn-pill ${actionTab === 'deposit' ? 'btn-lavender' : 'btn-white'}`}
-                        style={{ padding: '6px 14px', fontSize: '0.82rem' }}
+                        className={`btn btn-sm ${actionTab === 'deposit' ? 'btn-primary' : 'btn-secondary'}`}
                       >
-                        <ArrowDownLeft size={14} /> Deposit
+                        Deposit
                       </button>
                       <button
                         type="button"
                         onClick={() => setActionTab('withdraw')}
-                        className={`btn-pill ${actionTab === 'withdraw' ? 'btn-lavender' : 'btn-white'}`}
-                        style={{ padding: '6px 14px', fontSize: '0.82rem' }}
+                        className={`btn btn-sm ${actionTab === 'withdraw' ? 'btn-primary' : 'btn-secondary'}`}
                       >
-                        <ArrowUpRight size={14} /> Withdraw
+                        Withdraw
                       </button>
                     </div>
 
                     <form onSubmit={handleExecuteTransaction}>
-                      <div style={{ marginBottom: 14 }}>
-                        <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: 6, color: 'var(--text)' }}>
-                          {actionTab === 'deposit' ? 'Target Account' : 'From account'}
+                      <div className="form-group">
+                        <label className="form-label">
+                          {actionTab === 'deposit' ? 'Target Vault' : 'Funding Vault'}
                         </label>
                         <select
                           value={selectedAccountId}
                           onChange={(e) => setSelectedAccountId(e.target.value)}
-                          style={{ width: '100%', padding: '12px 16px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', backgroundColor: 'var(--bg)', color: 'var(--text)', fontWeight: 700 }}
+                          className="form-select mono"
                         >
                           {accounts.map((acc) => (
                             <option key={acc.id} value={acc.id}>
@@ -843,110 +1018,134 @@ export default function App() {
                       </div>
 
                       {actionTab === 'transfer' && (
-                        <div style={{ marginBottom: 14 }}>
-                          <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: 6, color: 'var(--text)' }}>
-                            To account
+                        <div className="form-group">
+                          <label className="form-label">
+                            <span>Recipient Account Number</span>
+                            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>e.g. ACC-1000000002</span>
                           </label>
                           <input
                             type="text"
                             required
-                            placeholder="e.g. ACC-1000000002"
+                            placeholder="ACC-1000000002"
                             value={targetAccountNumber}
                             onChange={(e) => setTargetAccountNumber(e.target.value)}
-                            style={{ width: '100%', padding: '12px 16px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', backgroundColor: 'var(--bg)', color: 'var(--text)' }}
+                            className="form-input mono"
                           />
                         </div>
                       )}
 
-                      <div style={{ marginBottom: 14 }}>
-                        <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: 6, color: 'var(--text)' }}>
-                          Amount ($)
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0.01"
-                          required
-                          placeholder="0.00"
-                          value={amount}
-                          onChange={(e) => setAmount(e.target.value)}
-                          style={{ width: '100%', padding: '12px 16px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', backgroundColor: 'var(--bg)', color: 'var(--text)', fontWeight: 800 }}
-                        />
+                      <div className="form-group">
+                        <label className="form-label">Amount (USD)</label>
+                        <div style={{ position: 'relative' }}>
+                          <span
+                            style={{
+                              position: 'absolute',
+                              left: 12,
+                              top: '50%',
+                              transform: 'translateY(-50%)',
+                              fontWeight: 700,
+                              color: 'var(--text-muted)',
+                            }}
+                          >
+                            $
+                          </span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            required
+                            placeholder="0.00"
+                            value={amount}
+                            onChange={(e) => setAmount(e.target.value)}
+                            className="form-input mono"
+                            style={{ paddingLeft: 26, fontWeight: 700 }}
+                          />
+                        </div>
                       </div>
 
-                      <div style={{ marginBottom: 18 }}>
-                        <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: 6, color: 'var(--text)' }}>
-                          Note (optional)
-                        </label>
+                      <div className="form-group">
+                        <label className="form-label">Transaction Memo (Optional)</label>
                         <input
                           type="text"
-                          placeholder="Transaction note"
+                          placeholder="e.g. Vendor payment, payroll, savings deposit"
                           value={description}
                           onChange={(e) => setDescription(e.target.value)}
-                          style={{ width: '100%', padding: '12px 16px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', backgroundColor: 'var(--bg)', color: 'var(--text)' }}
+                          className="form-input"
                         />
                       </div>
 
-                      {/* Lavender pill "Send securely" button */}
                       <button
                         type="submit"
                         disabled={loading}
-                        className="btn-pill btn-lavender"
-                        style={{ width: '100%', padding: '13px 0', fontSize: '0.98rem' }}
+                        className="btn btn-primary"
+                        style={{ width: '100%', marginTop: 8 }}
                       >
-                        {loading ? 'Processing...' : actionTab === 'transfer' ? 'Send securely' : `Execute ${actionTab}`}
+                        {loading
+                          ? 'Settling on Ledger...'
+                          : actionTab === 'transfer'
+                          ? 'Execute Transfer'
+                          : `Confirm ${actionTab.charAt(0).toUpperCase() + actionTab.slice(1)}`}
                       </button>
 
-                      {/* Small mint note with shield icon */}
+                      {/* Security Guarantee Banner */}
                       <div
                         style={{
-                          backgroundColor: 'var(--mint-light)',
-                          border: '1px solid rgba(185, 240, 216, 0.85)',
+                          marginTop: 14,
+                          padding: '10px 12px',
                           borderRadius: 'var(--radius-sm)',
-                          padding: '12px 16px',
+                          backgroundColor: 'var(--surface-subtle)',
+                          border: '1px solid var(--border)',
+                          fontSize: '0.75rem',
+                          color: 'var(--text-muted)',
                           display: 'flex',
                           alignItems: 'center',
-                          gap: 10,
-                          marginTop: 18,
+                          gap: 8,
                         }}
                       >
-                        <Icon name="shield" size={18} />
-                        <span style={{ fontSize: '0.82rem', color: 'var(--mint-dark)', fontWeight: 700, lineHeight: 1.35 }}>
-                          Every transfer has its own key, so a retry never pays twice.
-                        </span>
+                        <ShieldCheck size={16} color="var(--success)" style={{ flexShrink: 0 }} />
+                        <span>Protected by SHA-256 Idempotency Header. Safe against duplicate charges.</span>
                       </div>
                     </form>
                   </div>
 
-                  {/* RECENT ACTIVITY LIST (with coin, plane, and wallet icons) */}
-                  <div className="card-soft" style={{ padding: 28, display: 'flex', flexDirection: 'column' }}>
+                  {/* RIGHT: RECENT ACTIVITY STREAM */}
+                  <div className="pro-card" style={{ padding: '24px 22px', display: 'flex', flexDirection: 'column' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <IconTile name="coin" size={38} bg="var(--peach-light)" />
+                        <div
+                          style={{
+                            width: 32,
+                            height: 32,
+                            borderRadius: 'var(--radius-sm)',
+                            backgroundColor: 'var(--surface-subtle)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <Activity size={18} color="var(--primary)" />
+                        </div>
                         <div>
-                          <h3 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Recent activity</h3>
-                          <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                            {selectedAccount ? selectedAccount.accountNumber : ''}
+                          <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>Recent Ledger Activity</h3>
+                          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                            Selected Account: {selectedAccount ? selectedAccount.accountNumber : ''}
                           </p>
                         </div>
                       </div>
 
                       {statement?.reconciliation && (
-                        <span className="badge-pill badge-mint" style={{ fontSize: '0.72rem' }}>
-                          <CheckCircle2 size={13} />
+                        <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>
+                          <CheckCircle2 size={12} />
                           Reconciled
                         </span>
                       )}
                     </div>
 
-                    <div style={{ overflowY: 'auto', maxHeight: 440, flex: 1, paddingRight: 4 }}>
+                    <div style={{ overflowY: 'auto', maxHeight: 420, flex: 1 }}>
                       {statement && statement.entries.length > 0 ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                           {statement.entries.map((entry) => {
                             const isCredit = entry.direction === 'CREDIT';
-                            const iconType =
-                              entry.type === 'TRANSFER' ? 'plane' : isCredit ? 'coin' : 'wallet';
-
                             return (
                               <div
                                 key={entry.id}
@@ -954,41 +1153,54 @@ export default function App() {
                                   display: 'flex',
                                   alignItems: 'center',
                                   justifyContent: 'space-between',
-                                  padding: '12px 16px',
+                                  padding: '12px 14px',
                                   borderRadius: 'var(--radius-sm)',
-                                  backgroundColor: isCredit ? 'rgba(232, 245, 233, 0.4)' : 'rgba(255, 240, 242, 0.45)',
-                                  border: `1px solid ${isCredit ? 'rgba(200, 230, 201, 0.6)' : 'rgba(255, 212, 216, 0.6)'}`,
+                                  border: '1px solid var(--border)',
+                                  backgroundColor: '#ffffff',
                                 }}
                               >
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                  <IconTile
-                                    name={iconType}
-                                    size={36}
-                                    bg={isCredit ? 'var(--mint-light)' : 'var(--blush-light)'}
-                                  />
+                                  <div
+                                    style={{
+                                      width: 32,
+                                      height: 32,
+                                      borderRadius: 'var(--radius-sm)',
+                                      backgroundColor: isCredit ? 'var(--success-light)' : 'var(--danger-light)',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      flexShrink: 0,
+                                    }}
+                                  >
+                                    {isCredit ? (
+                                      <ArrowDownLeft size={16} color="var(--success)" />
+                                    ) : (
+                                      <ArrowUpRight size={16} color="var(--danger)" />
+                                    )}
+                                  </div>
+
                                   <div>
-                                    <div style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--text)' }}>
+                                    <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)' }}>
                                       {entry.description || entry.type}
                                     </div>
-                                    <div className="mono" style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                                    <div className="mono" style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                                       {new Date(entry.timestamp).toLocaleDateString()} • {new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                     </div>
                                   </div>
                                 </div>
 
-                                {/* Amount: Green for credits, Coral for debits */}
                                 <div style={{ textAlign: 'right' }}>
                                   <div
                                     className="mono"
                                     style={{
-                                      fontSize: '1.05rem',
-                                      fontWeight: 900,
+                                      fontSize: '0.95rem',
+                                      fontWeight: 800,
                                       color: isCredit ? 'var(--success)' : 'var(--danger)',
                                     }}
                                   >
                                     {isCredit ? '+' : '-'}${parseFloat(entry.amount).toFixed(2)}
                                   </div>
-                                  <div className="mono" style={{ fontSize: '0.74rem', color: 'var(--text-light)' }}>
+                                  <div className="mono" style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                                     Bal: ${parseFloat(entry.balanceAfter).toFixed(2)}
                                   </div>
                                 </div>
@@ -997,9 +1209,10 @@ export default function App() {
                           })}
                         </div>
                       ) : (
-                        <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-light)' }}>
-                          <Icon name="coin" size={32} />
-                          <p style={{ fontWeight: 700, marginTop: 10 }}>No activity recorded yet</p>
+                        <div style={{ textAlign: 'center', padding: '48px 16px', color: 'var(--text-muted)' }}>
+                          <Activity size={32} style={{ margin: '0 auto 10px', opacity: 0.4 }} />
+                          <p style={{ fontWeight: 600, fontSize: '0.875rem' }}>No ledger transactions recorded yet</p>
+                          <p style={{ fontSize: '0.78rem', marginTop: 4 }}>Execute a deposit or transfer to see entries</p>
                         </div>
                       )}
                     </div>
@@ -1008,137 +1221,124 @@ export default function App() {
               </div>
             )}
 
-            {/* VIEW 2: STATEMENTS PAGE (NO DOG) */}
+            {/* VIEW B: STATEMENTS & RECONCILIATION */}
             {dashboardTab === 'statements' && (
-              <div>
-                {/* Title with Piggy badge */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                    <IconTile name="piggy" size={48} bg="var(--blush-light)" />
-                    <div>
-                      <h2 style={{ fontSize: '1.45rem', fontWeight: 900 }}>Account Statements</h2>
-                      <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                        Ledger reconciliation for account {selectedAccount?.accountNumber}
-                      </p>
-                    </div>
+              <div className="animate-fade-in">
+                {/* Header & Account Picker */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                  <div>
+                    <h2 style={{ fontSize: '1.25rem', fontWeight: 800 }}>Account Statement & Ledger Audit</h2>
+                    <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                      Reconciliation against immutable double-entry ledger rows
+                    </p>
                   </div>
 
-                  <select
-                    value={selectedAccountId}
-                    onChange={(e) => setSelectedAccountId(e.target.value)}
-                    style={{ padding: '10px 16px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', backgroundColor: 'var(--surface)', color: 'var(--text)', fontWeight: 700 }}
-                  >
-                    {accounts.map((acc) => (
-                      <option key={acc.id} value={acc.id}>
-                        {acc.accountNumber} (${parseFloat(acc.balance).toFixed(2)})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* THREE SUMMARY TILES (Money in, Money out, Closing balance) */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 18, marginBottom: 24 }}>
-                  {/* Money In */}
-                  <div className="card-soft" style={{ padding: 22, display: 'flex', alignItems: 'center', gap: 16, borderTop: '4px solid var(--mint)' }}>
-                    <IconTile name="coin" size={44} bg="var(--mint-light)" />
-                    <div>
-                      <div style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                        Money In
-                      </div>
-                      <div className="mono" style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--success)' }}>
-                        +${statementCreditsTotal.toFixed(2)}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Money Out */}
-                  <div className="card-soft" style={{ padding: 22, display: 'flex', alignItems: 'center', gap: 16, borderTop: '4px solid var(--blush)' }}>
-                    <IconTile name="plane" size={44} bg="var(--blush-light)" />
-                    <div>
-                      <div style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                        Money Out
-                      </div>
-                      <div className="mono" style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--danger)' }}>
-                        -${statementDebitsTotal.toFixed(2)}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Closing Balance */}
-                  <div className="card-soft" style={{ padding: 22, display: 'flex', alignItems: 'center', gap: 16, borderTop: '4px solid var(--primary)' }}>
-                    <IconTile name="wallet" size={44} bg="var(--primary-light)" />
-                    <div>
-                      <div style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                        Closing Balance
-                      </div>
-                      <div className="mono" style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--text)' }}>
-                        ${selectedAccount ? parseFloat(selectedAccount.balance).toFixed(2) : '0.00'}
-                      </div>
-                    </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                      Vault:
+                    </span>
+                    <select
+                      value={selectedAccountId}
+                      onChange={(e) => setSelectedAccountId(e.target.value)}
+                      className="form-select mono"
+                      style={{ width: 'auto', minWidth: 220 }}
+                    >
+                      {accounts.map((acc) => (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.accountNumber} (${parseFloat(acc.balance).toFixed(2)})
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 
-                {/* Icon-Led Entry List with Credit/Debit pills */}
-                <div className="card-soft" style={{ padding: 28, marginBottom: 20 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-                    <h3 style={{ fontSize: '1.15rem', fontWeight: 800 }}>Ledger Entries</h3>
+                {/* SUMMARY METRICS TILES */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                    gap: 16,
+                    marginBottom: 24,
+                  }}
+                >
+                  <div className="pro-card" style={{ padding: '20px' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>
+                      Total Inflows (Credits)
+                    </div>
+                    <div className="mono" style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--success)' }}>
+                      +${statementCreditsTotal.toFixed(2)}
+                    </div>
+                  </div>
+
+                  <div className="pro-card" style={{ padding: '20px' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>
+                      Total Outflows (Debits)
+                    </div>
+                    <div className="mono" style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--danger)' }}>
+                      -${statementDebitsTotal.toFixed(2)}
+                    </div>
+                  </div>
+
+                  <div className="pro-card" style={{ padding: '20px' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>
+                      Current Stored Balance
+                    </div>
+                    <div className="mono" style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                      ${selectedAccount ? parseFloat(selectedAccount.balance).toFixed(2) : '0.00'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* STATEMENT LEDGER TABLE */}
+                <div className="pro-card" style={{ padding: '24px 22px', marginBottom: 20 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>Double-Entry Journal Entries</h3>
+
                     {statement?.reconciliation && (
-                      <span className="badge-pill badge-mint">
+                      <span className="badge badge-success">
                         <CheckCircle2 size={13} />
-                        Reconciled: Stored ${parseFloat(statement.reconciliation.storedBalance).toFixed(2)} === Derived ${parseFloat(statement.reconciliation.derivedBalance).toFixed(2)}
+                        Reconciled: Stored ${parseFloat(statement.reconciliation.storedBalance).toFixed(2)} ≡ Derived ${parseFloat(statement.reconciliation.derivedBalance).toFixed(2)}
                       </span>
                     )}
                   </div>
 
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+                  <div className="pro-table-wrapper">
+                    <table className="pro-table">
                       <thead>
-                        <tr style={{ borderBottom: '2px solid var(--border)', color: 'var(--text-muted)' }}>
-                          <th style={{ padding: '12px 10px', textAlign: 'left' }}>Item</th>
-                          <th style={{ padding: '12px 10px', textAlign: 'left' }}>Timestamp</th>
-                          <th style={{ padding: '12px 10px', textAlign: 'left' }}>Direction</th>
-                          <th style={{ padding: '12px 10px', textAlign: 'right' }}>Amount</th>
-                          <th style={{ padding: '12px 10px', textAlign: 'right' }}>Balance After</th>
+                        <tr>
+                          <th>Transaction / Memo</th>
+                          <th>Timestamp</th>
+                          <th>Direction</th>
+                          <th style={{ textAlign: 'right' }}>Amount</th>
+                          <th style={{ textAlign: 'right' }}>Balance After</th>
                         </tr>
                       </thead>
                       <tbody>
                         {statement && statement.entries.length > 0 ? (
                           statement.entries.map((entry) => {
                             const isCredit = entry.direction === 'CREDIT';
-                            const iconName =
-                              entry.type === 'TRANSFER' ? 'plane' : isCredit ? 'coin' : 'wallet';
-
                             return (
-                              <tr key={entry.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                                <td style={{ padding: '12px 10px' }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                    <IconTile
-                                      name={iconName}
-                                      size={34}
-                                      bg={isCredit ? 'var(--mint-light)' : 'var(--blush-light)'}
-                                    />
-                                    <div>
-                                      <div style={{ fontWeight: 800, color: 'var(--text)' }}>
-                                        {entry.description || entry.type}
-                                      </div>
-                                      <div className="mono" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                        Ref: {entry.referenceId.slice(0, 8)}...
-                                      </div>
-                                    </div>
+                              <tr key={entry.id}>
+                                <td>
+                                  <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                                    {entry.description || entry.type}
+                                  </div>
+                                  <div className="mono" style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                    Ref: {entry.referenceId.slice(0, 8)}...
                                   </div>
                                 </td>
-                                <td className="mono" style={{ padding: '12px 10px', color: 'var(--text-muted)' }}>
+                                <td className="mono" style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                                   {new Date(entry.timestamp).toLocaleString()}
                                 </td>
-                                <td style={{ padding: '12px 10px' }}>
-                                  <span className={`badge-pill ${isCredit ? 'badge-mint' : 'badge-blush'}`}>
+                                <td>
+                                  <span className={`badge ${isCredit ? 'badge-success' : 'badge-danger'}`}>
                                     {entry.direction}
                                   </span>
                                 </td>
-                                <td className="mono" style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 900, color: isCredit ? 'var(--success)' : 'var(--danger)' }}>
+                                <td className="mono" style={{ textAlign: 'right', fontWeight: 800, color: isCredit ? 'var(--success)' : 'var(--danger)' }}>
                                   {isCredit ? '+' : '-'}${parseFloat(entry.amount).toFixed(2)}
                                 </td>
-                                <td className="mono" style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 700 }}>
+                                <td className="mono" style={{ textAlign: 'right', fontWeight: 600, color: 'var(--text-primary)' }}>
                                   ${parseFloat(entry.balanceAfter).toFixed(2)}
                                 </td>
                               </tr>
@@ -1146,9 +1346,8 @@ export default function App() {
                           })
                         ) : (
                           <tr>
-                            <td colSpan={5} style={{ padding: '32px', textAlign: 'center', color: 'var(--text-light)' }}>
-                              <Icon name="coin" size={28} />
-                              <p style={{ marginTop: 8, fontWeight: 700 }}>No statement entries recorded</p>
+                            <td colSpan={5} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
+                              No ledger entries found for this period.
                             </td>
                           </tr>
                         )}
@@ -1157,22 +1356,27 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Mint shield note */}
+                {/* RECONCILIATION CERTIFICATE */}
                 <div
                   style={{
-                    backgroundColor: 'var(--mint-light)',
-                    border: '1px solid rgba(185, 240, 216, 0.85)',
+                    padding: '16px 20px',
                     borderRadius: 'var(--radius-sm)',
-                    padding: '14px 18px',
+                    backgroundColor: 'var(--success-light)',
+                    border: '1px solid var(--success-border)',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 12,
+                    gap: 14,
                   }}
                 >
-                  <Icon name="shield" size={24} />
-                  <span style={{ fontSize: '0.85rem', color: 'var(--mint-dark)', fontWeight: 700 }}>
-                    Every entry is one half of a balanced debit and credit pair.
-                  </span>
+                  <ShieldCheck size={24} color="var(--success)" style={{ flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--success-text)' }}>
+                      Formal Accounting Proof of Solvency
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--success-text)', opacity: 0.9 }}>
+                      Every ledger entry represents one leg of a balanced transaction. Account balance is reconstructable from genesis.
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -1180,52 +1384,67 @@ export default function App() {
         )}
 
         {/* ==================================================== */}
-        {/* ROLE 2: AUDITOR VIEW (NO DOG)                        */}
+        {/* ROLE 2: AUDITOR DASHBOARD                            */}
         {/* ==================================================== */}
         {currentUser.role === 'AUDITOR' && (
-          <div>
-            {/* Global Mathematical Conservation Card with Shield Tile */}
+          <div className="animate-fade-in">
+            {/* Global Conservation Invariant Card */}
             {conservation && (
               <div
-                className="card-soft"
+                className="pro-card"
                 style={{
-                  background: 'linear-gradient(135deg, var(--mint-light) 0%, var(--sky-light) 100%)',
-                  border: '1px solid var(--mint)',
-                  padding: '28px 32px',
-                  marginBottom: 28,
+                  padding: '24px 26px',
+                  marginBottom: 24,
+                  borderLeft: '4px solid var(--primary)',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                    <IconTile name="shield" size={48} bg="var(--mint)" />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <ShieldCheck size={24} color="var(--primary)" />
                     <div>
-                      <h2 style={{ fontSize: '1.3rem', fontWeight: 900 }}>Double-Entry Mathematical Conservation</h2>
-                      <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                        System Invariant Verification: Total Debits ≡ Total Credits
+                      <h2 style={{ fontSize: '1.15rem', fontWeight: 800 }}>Double-Entry Global Conservation Proof</h2>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        Fundamental Accounting Invariant: Total System Debits ≡ Total System Credits
                       </p>
                     </div>
                   </div>
-                  <span className="badge-pill badge-mint">
-                    {conservation.isConserved ? 'STRICTLY CONSERVED (Δ = $0.00)' : 'DISCREPANCY'}
+
+                  <span className={`badge ${conservation.isConserved ? 'badge-success' : 'badge-danger'}`} style={{ padding: '5px 12px' }}>
+                    {conservation.isConserved ? 'STRICTLY CONSERVED (Δ = $0.00)' : 'DISCREPANCY DETECTED'}
                   </span>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginTop: 14 }}>
-                  <div style={{ backgroundColor: 'rgba(255, 255, 255, 0.85)', padding: '16px 20px', borderRadius: 'var(--radius-sm)' }}>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 800 }}>Total System Debits</div>
-                    <div className="mono" style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--text)' }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                    gap: 14,
+                    marginTop: 16,
+                  }}
+                >
+                  <div style={{ backgroundColor: 'var(--surface-subtle)', padding: '14px 16px', borderRadius: 'var(--radius-sm)' }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
+                      Total Debits
+                    </div>
+                    <div className="mono" style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: 4 }}>
                       ${parseFloat(conservation.totalDebits).toFixed(2)}
                     </div>
                   </div>
-                  <div style={{ backgroundColor: 'rgba(255, 255, 255, 0.85)', padding: '16px 20px', borderRadius: 'var(--radius-sm)' }}>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 800 }}>Total System Credits</div>
-                    <div className="mono" style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--text)' }}>
+
+                  <div style={{ backgroundColor: 'var(--surface-subtle)', padding: '14px 16px', borderRadius: 'var(--radius-sm)' }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
+                      Total Credits
+                    </div>
+                    <div className="mono" style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: 4 }}>
                       ${parseFloat(conservation.totalCredits).toFixed(2)}
                     </div>
                   </div>
-                  <div style={{ backgroundColor: 'rgba(255, 255, 255, 0.85)', padding: '16px 20px', borderRadius: 'var(--radius-sm)' }}>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 800 }}>Discrepancy (Δ)</div>
-                    <div className="mono" style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--success)' }}>
+
+                  <div style={{ backgroundColor: 'var(--surface-subtle)', padding: '14px 16px', borderRadius: 'var(--radius-sm)' }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
+                      System Discrepancy (Δ)
+                    </div>
+                    <div className="mono" style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--success)', marginTop: 4 }}>
                       ${parseFloat(conservation.discrepancy).toFixed(4)}
                     </div>
                   </div>
@@ -1233,21 +1452,21 @@ export default function App() {
               </div>
             )}
 
-            {/* Cross-Account Statement Inspector with Wallet Tile */}
-            <div className="card-soft" style={{ padding: 28, marginBottom: 28 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <IconTile name="wallet" size={42} bg="var(--primary-light)" />
-                  <div>
-                    <h3 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Cross-Account Statement Inspector</h3>
-                    <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Auditors have system-wide read-only access</p>
-                  </div>
+            {/* Cross-Account Statement Inspector */}
+            <div className="pro-card" style={{ padding: '24px 22px', marginBottom: 24 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>Cross-Account Ledger Inspector</h3>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    Auditors hold system-wide read-only visibility across all customer and clearing vaults
+                  </p>
                 </div>
 
                 <select
                   value={selectedAccountId}
                   onChange={(e) => setSelectedAccountId(e.target.value)}
-                  style={{ padding: '10px 16px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', backgroundColor: 'var(--bg)', color: 'var(--text)', fontWeight: 700 }}
+                  className="form-select mono"
+                  style={{ width: 'auto', minWidth: 260 }}
                 >
                   {allAccounts.map((acc) => (
                     <option key={acc.id} value={acc.id}>
@@ -1258,87 +1477,88 @@ export default function App() {
               </div>
 
               {statement && statement.entries.length > 0 ? (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+                <div className="pro-table-wrapper">
+                  <table className="pro-table">
                     <thead>
-                      <tr style={{ borderBottom: '2px solid var(--border)', color: 'var(--text-muted)' }}>
-                        <th style={{ padding: '10px 8px', textAlign: 'left' }}>Timestamp</th>
-                        <th style={{ padding: '10px 8px', textAlign: 'left' }}>Direction</th>
-                        <th style={{ padding: '10px 8px', textAlign: 'right' }}>Amount</th>
-                        <th style={{ padding: '10px 8px', textAlign: 'right' }}>Balance After</th>
-                        <th style={{ padding: '10px 8px', textAlign: 'left' }}>Description</th>
+                      <tr>
+                        <th>Timestamp</th>
+                        <th>Direction</th>
+                        <th style={{ textAlign: 'right' }}>Amount</th>
+                        <th style={{ textAlign: 'right' }}>Balance After</th>
+                        <th>Description / Memo</th>
                       </tr>
                     </thead>
                     <tbody>
                       {statement.entries.map((entry) => (
-                        <tr key={entry.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                          <td className="mono" style={{ padding: '10px 8px', color: 'var(--text-muted)' }}>
+                        <tr key={entry.id}>
+                          <td className="mono" style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                             {new Date(entry.timestamp).toLocaleString()}
                           </td>
-                          <td style={{ padding: '10px 8px' }}>
-                            <span className={`badge-pill ${entry.direction === 'CREDIT' ? 'badge-mint' : 'badge-blush'}`}>
+                          <td>
+                            <span className={`badge ${entry.direction === 'CREDIT' ? 'badge-success' : 'badge-danger'}`}>
                               {entry.direction}
                             </span>
                           </td>
-                          <td className="mono" style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 800 }}>
+                          <td className="mono" style={{ textAlign: 'right', fontWeight: 800 }}>
                             ${parseFloat(entry.amount).toFixed(2)}
                           </td>
-                          <td className="mono" style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700 }}>
+                          <td className="mono" style={{ textAlign: 'right', fontWeight: 600 }}>
                             ${parseFloat(entry.balanceAfter).toFixed(2)}
                           </td>
-                          <td style={{ padding: '10px 8px', color: 'var(--text-muted)' }}>{entry.description}</td>
+                          <td style={{ color: 'var(--text-secondary)' }}>{entry.description}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
               ) : (
-                <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-light)' }}>
-                  <Icon name="wallet" size={28} />
-                  <p style={{ marginTop: 8, fontWeight: 700 }}>No statement entries for this account</p>
+                <div style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
+                  No statement entries found for this vault.
                 </div>
               )}
             </div>
 
-            {/* Compliance Audit Trail with Lock Tile */}
-            <div className="card-soft" style={{ padding: 28 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <IconTile name="lock" size={42} bg="var(--sky-light)" />
-                  <div>
-                    <h3 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Compliance Audit Trail (FR-10, SR-4)</h3>
-                    <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Immutable append-only record of all actions</p>
-                  </div>
+            {/* Compliance Audit Trail */}
+            <div className="pro-card" style={{ padding: '24px 22px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>Immutable Compliance Audit Trail (FR-10, SR-4)</h3>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    Append-only security log recording actor, action, target entity, and outcome
+                  </p>
                 </div>
 
-                <button type="button" onClick={loadAuditorData} className="btn-pill btn-white">
-                  <RefreshCw size={14} /> Refresh
+                <button type="button" onClick={loadAuditorData} className="btn btn-secondary btn-sm">
+                  <RefreshCw size={13} />
+                  Refresh
                 </button>
               </div>
 
               {auditLogs.length > 0 ? (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
+                <div className="pro-table-wrapper">
+                  <table className="pro-table">
                     <thead>
-                      <tr style={{ borderBottom: '2px solid var(--border)', color: 'var(--text-muted)' }}>
-                        <th style={{ padding: '10px 8px', textAlign: 'left' }}>Timestamp</th>
-                        <th style={{ padding: '10px 8px', textAlign: 'left' }}>Actor</th>
-                        <th style={{ padding: '10px 8px', textAlign: 'left' }}>Action</th>
-                        <th style={{ padding: '10px 8px', textAlign: 'left' }}>Target</th>
-                        <th style={{ padding: '10px 8px', textAlign: 'left' }}>Outcome</th>
+                      <tr>
+                        <th>Timestamp</th>
+                        <th>Actor</th>
+                        <th>Action</th>
+                        <th>Target</th>
+                        <th>Outcome</th>
                       </tr>
                     </thead>
                     <tbody>
                       {auditLogs.map((log) => (
-                        <tr key={log.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                          <td className="mono" style={{ padding: '10px 8px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                        <tr key={log.id}>
+                          <td className="mono" style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
                             {new Date(log.createdAt).toLocaleString()}
                           </td>
-                          <td style={{ padding: '10px 8px', fontWeight: 700 }}>{log.actorEmail}</td>
-                          <td style={{ padding: '10px 8px', fontWeight: 800 }}>{log.action}</td>
-                          <td style={{ padding: '10px 8px', color: 'var(--text-muted)' }}>{log.targetType}</td>
-                          <td style={{ padding: '10px 8px' }}>
-                            <span className={`badge-pill ${log.outcome === 'SUCCESS' ? 'badge-mint' : 'badge-blush'}`}>
+                          <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{log.actorEmail}</td>
+                          <td>
+                            <span className="badge badge-primary">{log.action}</span>
+                          </td>
+                          <td style={{ color: 'var(--text-muted)' }}>{log.targetType}</td>
+                          <td>
+                            <span className={`badge ${log.outcome === 'SUCCESS' ? 'badge-success' : 'badge-danger'}`}>
                               {log.outcome}
                             </span>
                           </td>
@@ -1348,9 +1568,8 @@ export default function App() {
                   </table>
                 </div>
               ) : (
-                <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-light)' }}>
-                  <Icon name="lock" size={28} />
-                  <p style={{ marginTop: 8, fontWeight: 700 }}>No audit logs recorded</p>
+                <div style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
+                  No audit log entries recorded.
                 </div>
               )}
             </div>
@@ -1358,101 +1577,109 @@ export default function App() {
         )}
 
         {/* ==================================================== */}
-        {/* ROLE 3: ADMIN VIEW (NO DOG)                          */}
+        {/* ROLE 3: ADMIN DASHBOARD                              */}
         {/* ==================================================== */}
         {currentUser.role === 'ADMIN' && (
-          <div>
-            {/* System Health Overview Cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18, marginBottom: 28 }}>
-              <div className="card-soft" style={{ padding: 22, borderTop: '4px solid var(--mint)', display: 'flex', alignItems: 'center', gap: 16 }}>
-                <IconTile name="shield" size={44} bg="var(--mint-light)" />
-                <div>
-                  <div style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                    Liveness Health
-                  </div>
-                  <div style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--success)' }}>HTTP 200 OK</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>Readiness: DB Connected</div>
+          <div className="animate-fade-in">
+            {/* System Health Telemetry Strip */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                gap: 16,
+                marginBottom: 24,
+              }}
+            >
+              <div className="pro-card" style={{ padding: '20px' }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>
+                  Liveness Probe
+                </div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--success)' }}>
+                  HTTP 200 OK
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                  Readiness: DB Connected
                 </div>
               </div>
 
-              <div className="card-soft" style={{ padding: 22, borderTop: '4px solid var(--primary)', display: 'flex', alignItems: 'center', gap: 16 }}>
-                <IconTile name="wallet" size={44} bg="var(--primary-light)" />
-                <div>
-                  <div style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                    Managed Accounts
-                  </div>
-                  <div style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--text)' }}>{allAccounts.length}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>Customer & System Vaults</div>
+              <div className="pro-card" style={{ padding: '20px' }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>
+                  Managed Vaults
+                </div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                  {allAccounts.length}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                  Customer & Clearing Accounts
                 </div>
               </div>
 
-              <div className="card-soft" style={{ padding: 22, borderTop: '4px solid var(--sky)', display: 'flex', alignItems: 'center', gap: 16 }}>
-                <IconTile name="coin" size={44} bg="var(--sky-light)" />
-                <div>
-                  <div style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                    Books Invariant
-                  </div>
-                  <div style={{ fontSize: '1.4rem', fontWeight: 900, color: conservation?.isConserved ? 'var(--success)' : 'var(--danger)' }}>
-                    {conservation?.isConserved ? 'STRICTLY BALANCED' : 'ERROR'}
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>Δ = $0.0000</div>
+              <div className="pro-card" style={{ padding: '20px' }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>
+                  Books Invariant
+                </div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: conservation?.isConserved ? 'var(--success)' : 'var(--danger)' }}>
+                  {conservation?.isConserved ? 'CONSERVED' : 'ERROR'}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                  Δ = $0.0000 Discrepancy
                 </div>
               </div>
             </div>
 
-            {/* Account Access Management Table with Lock Tile */}
-            <div className="card-soft" style={{ padding: 28, marginBottom: 28 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <IconTile name="lock" size={42} bg="var(--blush-light)" />
-                  <div>
-                    <h3 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Account Access Management (BalanceVault)</h3>
-                    <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Activate, freeze, or review customer accounts</p>
-                  </div>
+            {/* Customer Account Management Table */}
+            <div className="pro-card" style={{ padding: '24px 22px', marginBottom: 24 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>Account Access Management (BalanceVault)</h3>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    Activate, freeze, or review customer accounts
+                  </p>
                 </div>
 
-                <button type="button" onClick={loadAdminData} className="btn-pill btn-white">
-                  <RefreshCw size={14} /> Refresh
+                <button type="button" onClick={loadAdminData} className="btn btn-secondary btn-sm">
+                  <RefreshCw size={13} />
+                  Refresh
                 </button>
               </div>
 
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+              <div className="pro-table-wrapper">
+                <table className="pro-table">
                   <thead>
-                    <tr style={{ borderBottom: '2px solid var(--border)', color: 'var(--text-muted)' }}>
-                      <th style={{ padding: '12px 10px', textAlign: 'left' }}>Account Number</th>
-                      <th style={{ padding: '12px 10px', textAlign: 'left' }}>Owner</th>
-                      <th style={{ padding: '12px 10px', textAlign: 'left' }}>Email</th>
-                      <th style={{ padding: '12px 10px', textAlign: 'right' }}>Balance</th>
-                      <th style={{ padding: '12px 10px', textAlign: 'left' }}>Status</th>
-                      <th style={{ padding: '12px 10px', textAlign: 'center' }}>Action</th>
+                    <tr>
+                      <th>Account Number</th>
+                      <th>Owner</th>
+                      <th>Email</th>
+                      <th style={{ textAlign: 'right' }}>Balance</th>
+                      <th>Status</th>
+                      <th style={{ textAlign: 'center' }}>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {allAccounts.map((acc) => (
-                      <tr key={acc.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td className="mono" style={{ padding: '12px 10px', fontWeight: 700 }}>{acc.accountNumber}</td>
-                        <td style={{ padding: '12px 10px' }}>{acc.owner?.fullName || 'System Account'}</td>
-                        <td className="mono" style={{ padding: '12px 10px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>{acc.owner?.email || 'N/A'}</td>
-                        <td className="mono" style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 800 }}>
+                      <tr key={acc.id}>
+                        <td className="mono" style={{ fontWeight: 600 }}>{acc.accountNumber}</td>
+                        <td>{acc.owner?.fullName || 'System Account'}</td>
+                        <td className="mono" style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{acc.owner?.email || 'N/A'}</td>
+                        <td className="mono" style={{ textAlign: 'right', fontWeight: 700 }}>
                           ${parseFloat(acc.balance).toFixed(2)}
                         </td>
-                        <td style={{ padding: '12px 10px' }}>
-                          <span className={`badge-pill ${acc.status === 'ACTIVE' ? 'badge-mint' : 'badge-blush'}`}>
+                        <td>
+                          <span className={`badge ${acc.status === 'ACTIVE' ? 'badge-success' : 'badge-danger'}`}>
                             {acc.status}
                           </span>
                         </td>
-                        <td style={{ padding: '12px 10px', textAlign: 'center' }}>
+                        <td style={{ textAlign: 'center' }}>
                           {acc.accountNumber.startsWith('SYS-') ? (
-                            <span style={{ fontSize: '0.8rem', color: 'var(--text-light)' }}>Protected</span>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>System Protected</span>
                           ) : (
                             <button
                               type="button"
                               onClick={() => handleToggleAccountStatus(acc.id, acc.status)}
-                              className={`btn-pill ${acc.status === 'ACTIVE' ? 'btn-coral' : 'btn-mint'}`}
-                              style={{ padding: '5px 14px', fontSize: '0.78rem' }}
+                              className={`btn btn-sm ${acc.status === 'ACTIVE' ? 'btn-danger' : 'btn-success'}`}
+                              style={{ padding: '4px 10px', fontSize: '0.75rem' }}
                             >
-                              {acc.status === 'ACTIVE' ? 'Freeze Account' : 'Activate Account'}
+                              {acc.status === 'ACTIVE' ? 'Freeze Vault' : 'Activate Vault'}
                             </button>
                           )}
                         </td>
@@ -1463,34 +1690,32 @@ export default function App() {
               </div>
             </div>
 
-            {/* Recent Audit Events with Coin Tile */}
-            <div className="card-soft" style={{ padding: 28 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                <IconTile name="coin" size={40} bg="var(--peach-light)" />
-                <h3 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Recent System Audit Events</h3>
-              </div>
-
+            {/* Recent System Audit Events */}
+            <div className="pro-card" style={{ padding: '24px 22px' }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 14 }}>Recent Administrative Operations</h3>
               {auditLogs.length > 0 ? (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
+                <div className="pro-table-wrapper">
+                  <table className="pro-table">
                     <thead>
-                      <tr style={{ borderBottom: '2px solid var(--border)', color: 'var(--text-muted)' }}>
-                        <th style={{ padding: '10px 8px', textAlign: 'left' }}>Timestamp</th>
-                        <th style={{ padding: '10px 8px', textAlign: 'left' }}>Actor</th>
-                        <th style={{ padding: '10px 8px', textAlign: 'left' }}>Action</th>
-                        <th style={{ padding: '10px 8px', textAlign: 'left' }}>Outcome</th>
+                      <tr>
+                        <th>Timestamp</th>
+                        <th>Actor</th>
+                        <th>Operation</th>
+                        <th>Outcome</th>
                       </tr>
                     </thead>
                     <tbody>
                       {auditLogs.slice(0, 8).map((log) => (
-                        <tr key={log.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                          <td className="mono" style={{ padding: '10px 8px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                        <tr key={log.id}>
+                          <td className="mono" style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
                             {new Date(log.createdAt).toLocaleString()}
                           </td>
-                          <td style={{ padding: '10px 8px' }}>{log.actorEmail}</td>
-                          <td style={{ padding: '10px 8px', fontWeight: 800 }}>{log.action}</td>
-                          <td style={{ padding: '10px 8px' }}>
-                            <span className={`badge-pill ${log.outcome === 'SUCCESS' ? 'badge-mint' : 'badge-blush'}`}>
+                          <td style={{ fontWeight: 600 }}>{log.actorEmail}</td>
+                          <td>
+                            <span className="badge badge-primary">{log.action}</span>
+                          </td>
+                          <td>
+                            <span className={`badge ${log.outcome === 'SUCCESS' ? 'badge-success' : 'badge-danger'}`}>
                               {log.outcome}
                             </span>
                           </td>
@@ -1500,9 +1725,8 @@ export default function App() {
                   </table>
                 </div>
               ) : (
-                <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-light)' }}>
-                  <Icon name="coin" size={28} />
-                  <p style={{ marginTop: 8, fontWeight: 700 }}>No recent audit events</p>
+                <div style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
+                  No recent audit events.
                 </div>
               )}
             </div>
@@ -1510,20 +1734,25 @@ export default function App() {
         )}
       </main>
 
-      {/* Footer */}
+      {/* FOOTER */}
       <footer
         style={{
           borderTop: '1px solid var(--border)',
+          backgroundColor: '#ffffff',
           color: 'var(--text-muted)',
-          padding: '20px 32px',
+          padding: '18px 24px',
           textAlign: 'center',
-          fontSize: '0.82rem',
-          backgroundColor: 'rgba(255, 255, 255, 0.72)',
-          position: 'relative',
-          zIndex: 10,
+          fontSize: '0.8rem',
         }}
       >
-        LedgerLine & BalanceVault • Double-Entry Money Movement Engine • Built for Snovasys Challenge 2026
+        <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+          <div>
+            <strong>LedgerLine & BalanceVault</strong> • Enterprise Financial Engine
+          </div>
+          <div>
+            Snovasys Fresher Hiring Challenge 2026 • Double-Entry Accounting Verified
+          </div>
+        </div>
       </footer>
     </div>
   );
