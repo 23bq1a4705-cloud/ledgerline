@@ -79,7 +79,7 @@ export class LedgerService {
     }
 
     const txResult = await prisma.$transaction(
-      async (tx) => {
+      async (tx: any) => {
         const clearingAcc = await this.getOrCreateSystemClearingAccount(tx);
 
       const targetAcc = await tx.account.findUnique({
@@ -200,7 +200,7 @@ export class LedgerService {
 
     let sourceAccountNumber = '';
     const txResult = await prisma.$transaction(
-      async (tx) => {
+      async (tx: any) => {
         const clearingAcc = await this.getOrCreateSystemClearingAccount(tx);
 
       const sourceAcc = await tx.account.findUnique({
@@ -333,7 +333,7 @@ export class LedgerService {
       throw new AppError('Cannot transfer funds to the identical account.', 400);
     }
 
-    const txResult = await prisma.$transaction(async (tx) => {
+    const txResult = await prisma.$transaction(async (tx: any) => {
       const [sourceAcc, targetAcc] = await Promise.all([
         tx.account.findUnique({ where: { id: params.sourceAccountId } }),
         tx.account.findUnique({ where: { id: params.targetAccountId } }),
