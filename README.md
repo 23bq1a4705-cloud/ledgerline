@@ -3,9 +3,21 @@
 **Enterprise Double-Entry Money Movement Engine & Account Management Platform**  
 *Snovasys Fresher Hiring Challenge 2026 Submission*
 
+[![Live Demo](https://img.shields.io/badge/Frontend-Vercel%20Production-black?logo=vercel)](https://ledgerline-theta-ten.vercel.app/)
+[![Backend API](https://img.shields.io/badge/Backend-Render%20Production-46E3B7?logo=render)](https://ledgerline-backend-pbum.onrender.com/health)
+[![Database](https://img.shields.io/badge/Database-Neon%20PostgreSQL-00E599?logo=postgresql)](https://ledgerline-backend-pbum.onrender.com/readiness)
 [![Security: Hardened](https://img.shields.io/badge/Security-SR--1%20to%20SR--9%20Compliant-success)](#security-architecture)
 [![Ledger: Double--Entry](https://img.shields.io/badge/Ledger-Conserved%20(%CE%A3Debit%20%3D%20%CE%A3Credit)-blue)](#double-entry-accounting-engine)
-[![Tests: Automated](https://img.shields.io/badge/Tests-Concurrency%20%7C%20Idempotency%20%7C%20Conservation-emerald)](#automated-testing-suite)
+
+---
+
+### 🌐 Live Production Deployments
+
+- **Web Application (Vercel):** [https://ledgerline-theta-ten.vercel.app/](https://ledgerline-theta-ten.vercel.app/)
+- **Core API Backend (Render):** [https://ledgerline-backend-pbum.onrender.com](https://ledgerline-backend-pbum.onrender.com)
+- **Database Engine (Neon):** Managed Serverless PostgreSQL (AWS Ohio)
+- **System Liveness Probe:** [https://ledgerline-backend-pbum.onrender.com/health](https://ledgerline-backend-pbum.onrender.com/health)
+- **Database Readiness Probe:** [https://ledgerline-backend-pbum.onrender.com/readiness](https://ledgerline-backend-pbum.onrender.com/readiness)
 
 ---
 
