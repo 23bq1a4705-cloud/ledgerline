@@ -6,6 +6,7 @@ import { Sidebar, NavTab } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
 import { SettingsModal } from './components/SettingsModal';
 import { TransferModal } from './components/TransferModal';
+import { AuthAtmosphere } from './components/AuthAtmosphere';
 import {
   Landmark,
   ShieldCheck,
@@ -415,18 +416,10 @@ function MainApp() {
   // ====================================================
   if (!currentUser) {
     return (
-      <div
-        style={{
-          minHeight: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'var(--grad-atmospheric)',
-          padding: '40px 16px',
-          position: 'relative',
-        }}
-      >
+      <div className="auth-page-wrapper">
+        {/* Subtle Pastel Background Atmosphere (Glows, Grid & Vector Topology) */}
+        <AuthAtmosphere />
+
         {/* Floating Topbar with Theme Switcher on Login Page */}
         <div
           style={{
@@ -436,6 +429,7 @@ function MainApp() {
             display: 'flex',
             alignItems: 'center',
             gap: 8,
+            zIndex: 20,
           }}
         >
           <div className="theme-segmented">
@@ -469,7 +463,7 @@ function MainApp() {
           </div>
         </div>
 
-        <div style={{ width: '100%', maxWidth: 450 }}>
+        <div className="auth-content-box">
           {/* Brand Header */}
           <div style={{ textAlign: 'center', marginBottom: 28 }}>
             <div
@@ -542,7 +536,7 @@ function MainApp() {
           )}
 
           {/* Main Auth Card */}
-          <div className="pro-card" style={{ padding: '32px 30px', boxShadow: 'var(--shadow-card-hover)' }}>
+          <div className="auth-card">
             <div style={{ marginBottom: 22 }}>
               <h2 style={{ fontSize: '1.18rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
                 {authMode === 'login' ? 'Sign in to Financial Console' : 'Register New Account Vault'}

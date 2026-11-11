@@ -299,3 +299,4 @@ export const TransferModal: React.FC<TransferModalProps> = ({
     </div>
   );
 };
+
