@@ -147,3 +147,4 @@ Open your live Vercel URL in your browser:
    - Sign out $\to$ Click **Admin**.
    - Review Health Telemetry (`/health` and `/readiness`).
    - Toggle **Freeze Vault** / **Activate Vault** on any customer account.
+
