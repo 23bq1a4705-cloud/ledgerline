@@ -85,7 +85,7 @@ You can deploy using Render's automatic **Blueprint** (recommended) or as a manu
    - **Runtime:** `Node`
    - **Build Command:**
      ```bash
-     npm install && node ./scripts/prepare-db.js && npx prisma db push --accept-data-loss && npx tsx prisma/seed.ts && npm run build
+     npm install --include=dev && node ./scripts/prepare-db.js && npx prisma db push --accept-data-loss && npx tsx prisma/seed.ts && npm run build
      ```
    - **Start Command:**
      ```bash
